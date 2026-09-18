@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+functions/lib/
+web/dist/
+*.tsbuildinfo
+
+# firebase
+.firebase/
+.firebaserc
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+firestore-emulator-data/
+serviceAccountKey.json
+*-service-account*.json
+
+# env
+.env
+.env.*
+!.env.example
+web/.env.local
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# test
+coverage/

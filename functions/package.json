@@ -1,0 +1,28 @@
+{
+  "name": "@care/functions",
+  "version": "0.1.0",
+  "private": true,
+  "description": "C.A.R.E. System 後端：Firebase Cloud Functions（違規登錄、雙軌反思卡工作流、累犯偵測、安全觀察員）",
+  "type": "module",
+  "main": "lib/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore,auth",
+    "deploy": "npm run build && firebase deploy --only functions"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

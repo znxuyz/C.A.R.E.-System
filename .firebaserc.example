@@ -1,0 +1,7 @@
+{
+  "//": "複製為 .firebaserc 並填入自己的 Firebase 專案 ID（.firebaserc 已加入 .gitignore）",
+  "projects": {
+    "default": "care-system-dev",
+    "prod": "care-system-prod"
+  }
+}

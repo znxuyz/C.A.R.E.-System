@@ -1,0 +1,24 @@
+{
+  "name": "care-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "C.A.R.E. System — Conduct Assessment & Reflection Education System",
+  "workspaces": [
+    "functions",
+    "web"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace functions",
+    "typecheck": "npm run typecheck --workspace functions && npm run typecheck --workspace web",
+    "build": "npm run build --workspace functions && npm run build --workspace web",
+    "dev:web": "npm run dev --workspace web",
+    "emulators": "firebase emulators:start --import=./firestore-emulator-data --export-on-exit",
+    "seed": "node seed/seed.mjs",
+    "deploy:backend": "firebase deploy --only firestore:rules,firestore:indexes,functions,storage",
+    "seed:demo": "node seed/seed.mjs --demo"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

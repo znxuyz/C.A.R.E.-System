@@ -1,0 +1,122 @@
+{
+  "SAFETY_REFLECTION_V1": {
+    "kind": "SAFETY_REFLECTION",
+    "title": "校園安全反思卡",
+    "subtitle": "適用：走廊奔跑",
+    "version": 1,
+    "active": true,
+    "guidance": "這張卡不是處罰，而是幫你想清楚「怎麼保護自己與同學」。填寫期間你可以正常飲水與如廁，需要協助請告訴學務處值班老師。",
+    "sections": [
+      {
+        "id": "review",
+        "title": "一、事件回顧",
+        "questions": [
+          { "id": "what_happened", "type": "textarea", "label": "我在什麼時間、哪個地點、做了什麼？", "required": true, "minLength": 20, "placeholder": "例：第二節下課，我在三樓走廊為了趕去操場而奔跑。" },
+          { "id": "speed_reason", "type": "choice", "label": "當時為什麼會跑？", "required": true, "options": ["趕時間", "跟同學追逐", "情緒激動", "沒注意到規定", "其他"] }
+        ]
+      },
+      {
+        "id": "risk",
+        "title": "二、風險思考",
+        "questions": [
+          { "id": "possible_risks", "type": "multiselect", "label": "走廊奔跑可能造成哪些危險？（可多選）", "required": true, "options": ["撞到同學", "自己跌倒受傷", "撞到轉角來人", "撞倒門窗或布告", "影響其他班上課", "造成他人恐慌"] },
+          { "id": "risk_story", "type": "textarea", "label": "請描述一個「如果那時撞到人」可能發生的後果", "required": true, "minLength": 20 }
+        ]
+      },
+      {
+        "id": "empathy",
+        "title": "三、影響他人",
+        "questions": [
+          { "id": "who_affected", "type": "textarea", "label": "我的行為可能影響到誰？他們會有什麼感受？", "required": true, "minLength": 15 }
+        ]
+      },
+      {
+        "id": "commit",
+        "title": "四、改善承諾",
+        "questions": [
+          { "id": "next_time", "type": "textarea", "label": "下次遇到同樣情況，我會怎麼做？（具體作法）", "required": true, "minLength": 30 },
+          { "id": "safety_tip", "type": "text", "label": "我可以用一句話提醒同學注意走廊安全", "required": true },
+          { "id": "self_rating", "type": "scale", "label": "我對這次反思的認真程度（1-5）", "required": true, "min": 1, "max": 5 }
+        ]
+      }
+    ]
+  },
+  "KIND_WORDS_REFLECTION_V1": {
+    "kind": "KIND_WORDS_REFLECTION",
+    "title": "口說好話反思卡",
+    "subtitle": "適用：口出穢言",
+    "version": 1,
+    "active": true,
+    "guidance": "語言會留在別人心裡很久。這張卡幫你練習把情緒說出來，而不是用傷人的話。填寫期間你可以正常飲水與如廁。",
+    "sections": [
+      {
+        "id": "review",
+        "title": "一、事件回顧",
+        "questions": [
+          { "id": "what_said", "type": "textarea", "label": "我當時說了什麼話？在什麼情況下說的？", "required": true, "minLength": 15 },
+          { "id": "trigger", "type": "choice", "label": "當時我的情緒最接近哪一種？", "required": true, "options": ["生氣", "覺得被嘲笑", "開玩笑", "習慣用語", "委屈難過", "其他"] }
+        ]
+      },
+      {
+        "id": "empathy",
+        "title": "二、同理思考",
+        "questions": [
+          { "id": "other_feeling", "type": "textarea", "label": "如果有人對我說同樣的話，我會有什麼感受？", "required": true, "minLength": 20 },
+          { "id": "affected_people", "type": "multiselect", "label": "這句話可能影響了誰？（可多選）", "required": true, "options": ["被說的同學", "旁邊聽到的同學", "老師", "我自己的形象", "班級氣氛"] }
+        ]
+      },
+      {
+        "id": "practice",
+        "title": "三、換句話說練習",
+        "questions": [
+          { "id": "rewrite", "type": "textarea", "label": "把當時說的話，改寫成可以表達情緒又不傷人的說法", "required": true, "minLength": 20, "placeholder": "例：我覺得被開玩笑很不舒服，可以請你停止嗎？" },
+          { "id": "kind_words", "type": "text", "label": "今天我想對那位同學說的一句好話", "required": true }
+        ]
+      },
+      {
+        "id": "commit",
+        "title": "四、改善承諾",
+        "questions": [
+          { "id": "next_time", "type": "textarea", "label": "下次情緒上來時，我會先做什麼？（具體作法）", "required": true, "minLength": 30 },
+          { "id": "self_rating", "type": "scale", "label": "我對這次反思的認真程度（1-5）", "required": true, "min": 1, "max": 5 }
+        ]
+      }
+    ]
+  },
+  "CONDUCT_REVIEW_V1": {
+    "kind": "CONDUCT_REVIEW",
+    "title": "行為檢討書",
+    "subtitle": "安全觀察員值勤後填寫",
+    "version": 1,
+    "active": true,
+    "guidance": "你剛完成一天的安全觀察員任務。請把你看到的、想到的寫下來，這份檢討書經導師簽章與生教組蓋章後，隔日即恢復自由下課。",
+    "sections": [
+      {
+        "id": "duty",
+        "title": "一、值勤觀察紀錄",
+        "questions": [
+          { "id": "observed_count", "type": "number", "label": "值勤期間我提醒了幾位同學？", "required": true, "min": 0, "max": 99 },
+          { "id": "hotspot", "type": "text", "label": "我觀察到最容易發生奔跑的地點是？", "required": true },
+          { "id": "how_i_remind", "type": "textarea", "label": "我是怎麼提醒同學的？對方的反應如何？", "required": true, "minLength": 30 }
+        ]
+      },
+      {
+        "id": "perspective",
+        "title": "二、換位思考",
+        "questions": [
+          { "id": "feeling", "type": "textarea", "label": "站在維護安全的位置上，我的感受是什麼？", "required": true, "minLength": 30 },
+          { "id": "understanding", "type": "textarea", "label": "現在我怎麼看自己之前的行為？", "required": true, "minLength": 30 }
+        ]
+      },
+      {
+        "id": "plan",
+        "title": "三、具體改善計畫",
+        "questions": [
+          { "id": "plan_detail", "type": "textarea", "label": "接下來一個月，我要如何避免重複同樣的行為？（請寫出可以被檢核的具體作法）", "required": true, "minLength": 50 },
+          { "id": "support_needed", "type": "textarea", "label": "我希望老師或同學可以怎麼幫我？", "required": false },
+          { "id": "message_to_future_self", "type": "text", "label": "給一個月後的自己一句話", "required": true }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "indexes": [
+    {
+      "//": "核心：累犯 15 天視窗查詢（studentId + 旗標 + status IN + countOn 範圍）",
+      "collectionGroup": "reflectionCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "countsTowardRecidivism", "order": "ASCENDING" },
+        { "fieldPath": "consumedByAlertId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "countOn", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "生教組待蓋章佇列（依導師簽章時間先進先出）",
+      "collectionGroup": "reflectionCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "teacherSignedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "導師待簽章佇列（本班 + 狀態 + 送出時間）",
+      "collectionGroup": "reflectionCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "classId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "排程續帳：未結案卡片 + 基準日早於今日",
+      "collectionGroup": "reflectionCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "countOn", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "學生歷程：個人反思卡時間軸",
+      "collectionGroup": "reflectionCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "countOn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "今日管制名單（依班級排序）",
+      "collectionGroup": "recessRestrictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "className", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "解鎖處理：某生仍在管制中的日期",
+      "collectionGroup": "recessRestrictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "安全觀察員追蹤清單（未結案 + 值勤日）",
+      "collectionGroup": "observerAssignments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dutyOn", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "違規事件列表（狀態 + 發生日新到舊）",
+      "collectionGroup": "infractions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "occurredOn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "班級違規統計 / 導師檢視",
+      "collectionGroup": "infractions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "classId", "order": "ASCENDING" },
+        { "fieldPath": "occurredOn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "學生個人違規歷程",
+      "collectionGroup": "infractions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "occurredOn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "累犯警示清單（待處理優先）",
+      "collectionGroup": "recidivismAlerts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "triggeredAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "檢討書審核佇列",
+      "collectionGroup": "conductReviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "生教組名單（roles 陣列 + 在職）",
+      "collectionGroup": "staff",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "roles", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "active", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "表單模板查找（種類 + 啟用）",
+      "collectionGroup": "formTemplates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kind", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "個人通知匣",
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipientId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

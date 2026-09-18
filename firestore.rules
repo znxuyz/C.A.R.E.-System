@@ -1,0 +1,209 @@
+rules_version = '2';
+
+/**
+ * C.A.R.E. System — Firestore 安全規則
+ *
+ * 授權模型
+ *  - 角色存於 Firebase Auth custom claims：request.auth.token.roles: string[]
+ *    （STUDENT / HOMEROOM_TEACHER / DISCIPLINE_STAFF / PATROL / ADMIN）
+ *  - 學生帳號另帶 request.auth.token.studentId。
+ *
+ * 寫入原則（最重要）
+ *  - 所有「業務狀態變更」一律走 Cloud Functions callable（Admin SDK 繞過本規則），
+ *    client 端在此僅有兩種例外寫入：
+ *      ① 學生暫存自己反思卡/檢討書的 answers（狀態須為 DRAFT 或 RETURNED）
+ *      ② 教職員更新自己的推播 token（fcmTokens）
+ *    其餘皆 deny，確保簽章時間、累犯計數、認列欄位不可被前端竄改。
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* ----------------------------- 共用函式 ----------------------------- */
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function roles() {
+      return signedIn() && 'roles' in request.auth.token
+        ? request.auth.token.roles
+        : [];
+    }
+
+    function hasRole(role) {
+      return role in roles();
+    }
+
+    function isAdmin() {
+      return hasRole('ADMIN');
+    }
+
+    function isOffice() {
+      return hasRole('DISCIPLINE_STAFF') || isAdmin();
+    }
+
+    function isStaff() {
+      return isOffice() || hasRole('HOMEROOM_TEACHER') || hasRole('PATROL');
+    }
+
+    function myStudentId() {
+      return signedIn() && 'studentId' in request.auth.token
+        ? request.auth.token.studentId
+        : null;
+    }
+
+    function isOwnStudent(studentId) {
+      return myStudentId() == studentId;
+    }
+
+    /** 導師僅能看自己班級：以 classes/{classId}.homeroomTeacherUid 判定 */
+    function isHomeroomOf(classId) {
+      return hasRole('HOMEROOM_TEACHER')
+        && exists(/databases/$(database)/documents/classes/$(classId))
+        && get(/databases/$(database)/documents/classes/$(classId)).data.homeroomTeacherUid == request.auth.uid;
+    }
+
+    /** 僅允許變更指定欄位 */
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    /* --------------------------- 設定類（唯讀） --------------------------- */
+
+    match /settings/{docId} {
+      allow read: if signedIn();
+      allow write: if false; // 僅管理後台（Admin SDK）可改
+    }
+
+    match /infractionTypes/{code} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /formTemplates/{templateId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /locations/{code} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /schoolCalendar/{day} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    /* ------------------------------ 人員主檔 ------------------------------ */
+
+    match /classes/{classId} {
+      allow read: if isStaff() || signedIn();
+      allow write: if false;
+    }
+
+    match /students/{studentId} {
+      allow read: if isStaff() || isOwnStudent(studentId);
+      // 學生僅能自行註冊推播 token
+      allow update: if isOwnStudent(studentId) && onlyChanges(['fcmTokens', 'updatedAt']);
+      allow create, delete: if false;
+    }
+
+    match /staff/{uid} {
+      allow read: if isStaff() && (request.auth.uid == uid || isOffice());
+      allow update: if request.auth.uid == uid && onlyChanges(['fcmTokens', 'updatedAt']);
+      allow create, delete: if false;
+    }
+
+    /* ------------------------------ 違規事件 ------------------------------ */
+
+    match /infractions/{infractionId} {
+      allow read: if isOffice()
+        || isOwnStudent(resource.data.studentId)
+        || isHomeroomOf(resource.data.classId);
+      // 登錄／撤銷一律經 callable：createInfraction / revokeInfraction
+      allow write: if false;
+    }
+
+    /* ------------------------------- 反思卡 ------------------------------- */
+
+    match /reflectionCards/{cardId} {
+      allow read: if isOffice()
+        || isOwnStudent(resource.data.studentId)
+        || isHomeroomOf(resource.data.classId);
+
+      // 學生暫存作答：僅限本人、僅限 DRAFT/RETURNED、僅限 answers 欄位
+      allow update: if isOwnStudent(resource.data.studentId)
+        && resource.data.status in ['DRAFT', 'RETURNED']
+        && onlyChanges(['answers', 'updatedAt']);
+
+      // 送出、簽章、蓋章、累犯認列 → 一律 callable
+      allow create, delete: if false;
+    }
+
+    /* ---------------------------- 下課管制帳 ----------------------------- */
+
+    match /recessRestrictions/{restrictionId} {
+      allow read: if isStaff() || isOwnStudent(resource.data.studentId);
+      allow write: if false;
+    }
+
+    /* ----------------------------- 累犯警示 ------------------------------ */
+
+    match /recidivismAlerts/{alertId} {
+      allow read: if isOffice() || isHomeroomOf(resource.data.classId);
+      allow write: if false;
+    }
+
+    /* --------------------------- 安全觀察員派單 -------------------------- */
+
+    match /observerAssignments/{assignmentId} {
+      allow read: if isOffice()
+        || isOwnStudent(resource.data.studentId)
+        || isHomeroomOf(resource.data.classId);
+      allow write: if false;
+    }
+
+    /* ----------------------------- 行為檢討書 ---------------------------- */
+
+    match /conductReviews/{reviewId} {
+      allow read: if isOffice()
+        || isOwnStudent(resource.data.studentId)
+        || isHomeroomOf(resource.data.classId);
+
+      allow update: if isOwnStudent(resource.data.studentId)
+        && resource.data.status in ['DRAFT', 'RETURNED']
+        && onlyChanges(['answers', 'updatedAt']);
+
+      allow create, delete: if false;
+    }
+
+    /* ------------------------------- 通知 -------------------------------- */
+
+    match /notifications/{notificationId} {
+      // 僅收件者本人（或生教組查核通報是否送達）可讀
+      allow read: if isOffice()
+        || request.auth.uid == resource.data.recipientId
+        || myStudentId() == resource.data.recipientId;
+      allow write: if false;
+    }
+
+    /** Trigger Email 擴充套件的寄信佇列：前端完全無權存取 */
+    match /mail/{mailId} {
+      allow read, write: if false;
+    }
+
+    /* ------------------------------- 稽核 -------------------------------- */
+
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    /* --------------------------- 預設全部拒絕 ---------------------------- */
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
