@@ -1,26 +1,21 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { USE_MOCK, auth } from '../lib/api.ts';
 import { Callout, Field } from '../components/ui.tsx';
 import type { Session } from '../lib/types.ts';
 
-const DEMO_ROLES = [
-  { key: 'office', label: '生教組', desc: '審核蓋章、登錄違規、累犯追蹤、值勤台', icon: '🛡️' },
-  { key: 'teacher', label: '班導師', desc: '線上簽章、勾選班級活動優先', icon: '✍️' },
-  { key: 'patrol', label: '糾察隊／巡堂教師', desc: '快速登錄違規', icon: '📋' },
-  { key: 'student', label: '學生', desc: '填寫反思卡、查詢下課狀態', icon: '🎒' },
-];
-
+/** 登入（單一帳號：生活教育組長） */
 export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const signIn = async (identifier: string, pass = '') => {
+  const signIn = async () => {
     setBusy(true);
     setError(null);
     try {
-      onSignedIn(await auth.signIn(identifier, pass));
+      onSignedIn(await auth.signIn(email, password));
     } catch (err) {
       setError(err instanceof Error ? err.message : '登入失敗');
     } finally {
@@ -38,46 +33,30 @@ export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }
             </div>
             <div>
               <div className="brand__name">C.A.R.E. System</div>
-              <div className="brand__sub">Conduct Assessment &amp; Reflection Education</div>
+              <div className="brand__sub">生活教育組登入</div>
             </div>
           </div>
-
-          <p className="small muted">
-            校園行為反思與追蹤系統｜違規登錄・雙軌反思卡・導師簽章・生教組蓋章・累犯警示
-          </p>
 
           {USE_MOCK ? (
             <>
               <Callout>
                 目前為<strong>示範模式</strong>（不連線 Firebase，資料僅存在瀏覽器）。
-                請選擇一個角色體驗操作動線。
+                直接按下方按鈕即可體驗完整操作。
               </Callout>
-              <div className="stack">
-                {DEMO_ROLES.map((role) => (
-                  <button
-                    key={role.key}
-                    className="choice"
-                    onClick={() => void signIn(role.key)}
-                    disabled={busy}
-                  >
-                    <span className="choice__icon" aria-hidden="true">
-                      {role.icon}
-                    </span>
-                    <span>
-                      <span className="choice__title">以「{role.label}」身分登入</span>
-                      <br />
-                      <span className="choice__desc">{role.desc}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <button
+                className="btn btn--primary btn--lg btn--block"
+                disabled={busy}
+                onClick={() => void signIn()}
+              >
+                {busy ? '登入中…' : '以生活教育組長身分進入'}
+              </button>
             </>
           ) : (
             <form
               className="stack"
               onSubmit={(event) => {
                 event.preventDefault();
-                void signIn(email, password);
+                void signIn();
               }}
             >
               <Field label="校務帳號（Email）">
@@ -87,6 +66,7 @@ export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }
                   onChange={(event) => setEmail(event.target.value)}
                   autoComplete="username"
                   required
+                  autoFocus
                 />
               </Field>
               <Field label="密碼">
@@ -105,6 +85,10 @@ export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }
           )}
 
           {error && <div className="field__error">{error}</div>}
+
+          <Link className="btn btn--ghost btn--block" to="/">
+            ← 返回公開看板
+          </Link>
         </div>
       </div>
     </div>

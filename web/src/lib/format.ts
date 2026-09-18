@@ -1,4 +1,10 @@
-import type { AssignmentStatus, CaseStatus, FormKind, RestrictionReason } from './types.ts';
+import type {
+  AlertStatus,
+  AssignmentStatus,
+  InfractionStatus,
+  PaperCard,
+  RestrictionReason,
+} from './types.ts';
 
 const TZ = 'Asia/Taipei';
 
@@ -13,11 +19,9 @@ export const todayTaipei = (offsetDays = 0): string =>
 export const formatDate = (iso?: string): string => {
   if (!iso) return '—';
   const value = iso.length === 10 ? `${iso}T00:00:00+08:00` : iso;
-  return new Intl.DateTimeFormat('zh-TW', {
-    timeZone: TZ,
-    month: 'numeric',
-    day: 'numeric',
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat('zh-TW', { timeZone: TZ, month: 'numeric', day: 'numeric' }).format(
+    new Date(value),
+  );
 };
 
 export const formatDateTime = (iso?: string): string => {
@@ -33,53 +37,42 @@ export const formatDateTime = (iso?: string): string => {
 };
 
 export const weekdayLabel = (date: string): string =>
-  ['日', '一', '二', '三', '四', '五', '六'][
-    new Date(`${date}T00:00:00+08:00`).getDay()
-  ] ?? '';
+  ['日', '一', '二', '三', '四', '五', '六'][new Date(`${date}T00:00:00+08:00`).getDay()] ?? '';
 
-export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
-  DRAFT: '未填寫',
-  PENDING_TEACHER: '待導師簽章',
-  PENDING_OFFICE: '待生教組蓋章',
-  COMPLETED: '已完成',
-  RETURNED: '退回補正',
-  EXEMPTED: '班級活動優先（不計處分）',
+export const INFRACTION_STATUS_LABEL: Record<InfractionStatus, string> = {
+  OPEN: '待回收反思卡',
+  DONE: '已回收・已解除',
+  EXEMPTED: '免記',
   VOIDED: '已撤銷',
 };
 
-export const CASE_STATUS_TONE: Record<CaseStatus, string> = {
-  DRAFT: 'neutral',
-  PENDING_TEACHER: 'warning',
-  PENDING_OFFICE: 'serious',
-  COMPLETED: 'good',
-  RETURNED: 'critical',
+export const INFRACTION_STATUS_TONE: Record<InfractionStatus, string> = {
+  OPEN: 'warning',
+  DONE: 'good',
   EXEMPTED: 'neutral',
   VOIDED: 'neutral',
 };
 
-export const FORM_KIND_LABEL: Record<FormKind, string> = {
-  SAFETY_REFLECTION: '校園安全反思卡',
-  KIND_WORDS_REFLECTION: '口說好話反思卡',
-  CONDUCT_REVIEW: '行為檢討書',
+export const PAPER_CARD_LABEL: Record<PaperCard, string> = {
+  SAFETY: '校園安全反思卡',
+  KIND_WORDS: '口說好話反思卡',
 };
 
-export const FORM_KIND_TONE: Record<FormKind, string> = {
-  SAFETY_REFLECTION: 'safety',
-  KIND_WORDS_REFLECTION: 'words',
-  CONDUCT_REVIEW: 'neutral',
+export const PAPER_CARD_TONE: Record<PaperCard, string> = {
+  SAFETY: 'safety',
+  KIND_WORDS: 'words',
 };
 
 export const RESTRICTION_REASON_LABEL: Record<RestrictionReason, string> = {
-  INFRACTION_REFLECTION: '待完成反思卡',
+  INFRACTION_PAPER: '待回收反思卡',
   OBSERVER_DUTY: '安全觀察員值勤',
-  OBSERVER_REVIEW_PENDING: '待檢討書審核',
+  OBSERVER_REVIEW_PENDING: '待回收檢討書',
 };
 
 export const ASSIGNMENT_STATUS_LABEL: Record<AssignmentStatus, string> = {
   SCHEDULED: '已排定',
   IN_PROGRESS: '值勤中',
-  DUTY_COMPLETED: '值勤完成・待檢討書',
-  REVIEW_PENDING: '檢討書審核中',
+  DUTY_COMPLETED: '待回收檢討書',
   CLOSED: '已結案',
   CANCELLED: '已取消',
 };
@@ -88,15 +81,22 @@ export const ASSIGNMENT_STATUS_TONE: Record<AssignmentStatus, string> = {
   SCHEDULED: 'warning',
   IN_PROGRESS: 'serious',
   DUTY_COMPLETED: 'serious',
-  REVIEW_PENDING: 'warning',
   CLOSED: 'good',
   CANCELLED: 'neutral',
 };
 
-export const ROLE_LABEL: Record<string, string> = {
-  STUDENT: '學生',
-  HOMEROOM_TEACHER: '班導師',
-  DISCIPLINE_STAFF: '生教組',
-  PATROL: '糾察隊',
-  ADMIN: '系統管理者',
+export const ALERT_STATUS_LABEL: Record<AlertStatus, string> = {
+  OPEN: '待處理',
+  ACKNOWLEDGED: '已確認',
+  ASSIGNED: '已派安全觀察員',
+  CLOSED: '已結案',
+  DISMISSED: '已撤銷',
+};
+
+export const ALERT_STATUS_TONE: Record<AlertStatus, string> = {
+  OPEN: 'critical',
+  ACKNOWLEDGED: 'warning',
+  ASSIGNED: 'serious',
+  CLOSED: 'good',
+  DISMISSED: 'neutral',
 };

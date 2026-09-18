@@ -14,7 +14,7 @@
     "dev:web": "npm run dev --workspace web",
     "emulators": "firebase emulators:start --import=./firestore-emulator-data --export-on-exit",
     "seed": "node seed/seed.mjs",
-    "deploy:backend": "firebase deploy --only firestore:rules,firestore:indexes,functions,storage",
+    "deploy:backend": "firebase deploy --only firestore:rules,firestore:indexes,functions",
     "seed:demo": "node seed/seed.mjs --demo",
     "test:rules": "npm run test:rules --workspace functions"
   },

@@ -1,45 +1,33 @@
 /** 前端檢視模型（與 functions/src/domain/types.ts 對應之精簡版） */
 
-export type Role = 'STUDENT' | 'HOMEROOM_TEACHER' | 'DISCIPLINE_STAFF' | 'PATROL' | 'ADMIN';
-
-export type CaseStatus =
-  | 'DRAFT'
-  | 'PENDING_TEACHER'
-  | 'PENDING_OFFICE'
-  | 'COMPLETED'
-  | 'RETURNED'
-  | 'EXEMPTED'
-  | 'VOIDED';
-
-export type FormKind = 'SAFETY_REFLECTION' | 'KIND_WORDS_REFLECTION' | 'CONDUCT_REVIEW';
-
+export type Role = 'DISCIPLINE_STAFF' | 'ADMIN';
+export type InfractionStatus = 'OPEN' | 'DONE' | 'EXEMPTED' | 'VOIDED';
+export type PaperCard = 'SAFETY' | 'KIND_WORDS';
 export type RestrictionReason =
-  | 'INFRACTION_REFLECTION'
+  | 'INFRACTION_PAPER'
   | 'OBSERVER_DUTY'
   | 'OBSERVER_REVIEW_PENDING';
-
 export type AssignmentStatus =
   | 'SCHEDULED'
   | 'IN_PROGRESS'
   | 'DUTY_COMPLETED'
-  | 'REVIEW_PENDING'
   | 'CLOSED'
   | 'CANCELLED';
+export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'ASSIGNED' | 'CLOSED' | 'DISMISSED';
 
 export interface Session {
   uid: string;
   name: string;
   roles: Role[];
-  studentId?: string;
   email?: string;
 }
 
 export interface InfractionTypeOption {
   code: string;
   name: string;
-  formKind: FormKind;
-  formTitle: string;
-  hint: string;
+  paperCard: PaperCard;
+  paperCardLabel: string;
+  icon?: string;
 }
 
 export interface LocationOption {
@@ -48,80 +36,28 @@ export interface LocationOption {
   isHotspot: boolean;
 }
 
-export interface ApprovalView {
-  stage: 'HOMEROOM_TEACHER' | 'DISCIPLINE_OFFICE';
-  decision: 'SIGNED' | 'RETURNED' | 'EXEMPTED';
-  actorName: string;
-  comment?: string;
-  actedAt: string;
-}
-
-export interface CardSummary {
+export interface InfractionRow {
   id: string;
   studentId: string;
   studentNo: string;
   studentName: string;
   className: string;
+  seatNo?: number;
+  typeCode: string;
   typeName: string;
-  formKind: FormKind;
-  formTitle: string;
-  status: CaseStatus;
-  countOn: string;
-  submittedAt?: string;
-  teacherSignedAt?: string;
-  teacherName?: string;
-  returnCount: number;
-  /** 累犯進度（此卡計入後，15 天視窗內的張數） */
-  windowCardCount?: number;
-}
-
-export interface FormQuestion {
-  id: string;
-  type: 'text' | 'textarea' | 'choice' | 'multiselect' | 'scale' | 'number';
-  label: string;
-  required?: boolean;
-  minLength?: number;
-  placeholder?: string;
-  options?: string[];
-  min?: number;
-  max?: number;
-}
-
-export interface FormSection {
-  id: string;
-  title: string;
-  questions: FormQuestion[];
-}
-
-export interface FormTemplate {
-  id: string;
-  title: string;
-  subtitle?: string;
-  guidance: string;
-  sections: FormSection[];
-}
-
-export interface CardDetail extends CardSummary {
-  template: FormTemplate;
-  answers: Record<string, unknown>;
-  approvals: ApprovalView[];
-  infraction: {
-    id: string;
-    typeName: string;
-    occurredAt: string;
-    periodNo: number;
-    locationName: string;
-    description?: string;
-    reporterName: string;
-    reporterRole: Role;
-  };
-  progress: {
-    cardCount: number;
-    threshold: number;
-    shortfall: number;
-    windowStart: string;
-    windowEnd: string;
-  };
+  paperCard: PaperCard;
+  occurredAt: string;
+  occurredOn: string;
+  periodNo: number;
+  locationName: string;
+  note?: string;
+  status: InfractionStatus;
+  paperReturnedOn?: string;
+  exemptReason?: string;
+  voidReason?: string;
+  recordedBy?: { uid: string; name: string };
+  /** 該筆登錄當下，15 天視窗內的累計次數（僅清單顯示用） */
+  windowCount?: number;
 }
 
 export interface RestrictionRow {
@@ -130,11 +66,11 @@ export interface RestrictionRow {
   studentNo: string;
   studentName: string;
   className: string;
+  seatNo?: number;
   date: string;
   reasons: RestrictionReason[];
   status: 'ACTIVE' | 'LIFTED' | 'CANCELLED';
   note?: string;
-  allowWaterAndRestroom: true;
 }
 
 export interface AlertRow {
@@ -147,12 +83,12 @@ export interface AlertRow {
   windowStart: string;
   windowEnd: string;
   windowDays: number;
-  cardCount: number;
+  count: number;
   threshold: number;
-  status: 'OPEN' | 'ACKNOWLEDGED' | 'ASSIGNED' | 'CLOSED' | 'DISMISSED';
+  status: AlertStatus;
   assignmentId?: string;
   dutyOn?: string;
-  breakdown: Array<{ cardId: string; formKind: FormKind; countOn: string }>;
+  breakdown: Array<{ infractionId: string; typeName: string; occurredOn: string }>;
 }
 
 export interface PeriodLogView {
@@ -165,6 +101,7 @@ export interface PeriodLogView {
 
 export interface AssignmentRow {
   id: string;
+  alertId: string;
   studentId: string;
   studentNo: string;
   studentName: string;
@@ -173,38 +110,36 @@ export interface AssignmentRow {
   status: AssignmentStatus;
   totalPeriods: number;
   periodLogs: PeriodLogView[];
-  conductReviewId?: string;
-  conductReviewStatus?: CaseStatus;
+  reviewReturnedOn?: string;
   unlockOn?: string;
+}
+
+export interface WatchlistRow {
+  studentId: string;
+  studentNo: string;
+  studentName: string;
+  className: string;
+  count: number;
+  shortfall: number;
 }
 
 export interface DashboardData {
   today: string;
   kpis: {
     restrictedActive: number;
-    pendingOffice: number;
-    pendingTeacher: number;
+    pendingPapers: number;
     openAlerts: number;
     observersToday: number;
-    atRiskStudents: number;
+    infractionsToday: number;
+    watchlist: number;
   };
   restrictions: RestrictionRow[];
-  officeQueue: CardSummary[];
+  pendingPapers: InfractionRow[];
   alerts: AlertRow[];
   assignments: AssignmentRow[];
-  /** 近 14 天每日反思卡張數（分卡種） */
-  trend: Array<{ date: string; safety: number; words: number }>;
-  /** 違規熱點 Top N */
+  trend: Array<{ date: string; safety: number; kindWords: number }>;
   hotspots: Array<{ name: string; count: number }>;
-}
-
-export interface StudentTimelineItem {
-  id: string;
-  kind: 'INFRACTION' | 'CARD' | 'ALERT' | 'DUTY' | 'REVIEW';
-  title: string;
-  detail: string;
-  at: string;
-  status?: string;
+  watchlist: WatchlistRow[];
 }
 
 export interface StudentDetail {
@@ -212,17 +147,35 @@ export interface StudentDetail {
   studentNo: string;
   name: string;
   className: string;
-  guardianEmail?: string;
-  progress: {
-    cardCount: number;
-    threshold: number;
-    shortfall: number;
-    windowStart: string;
-    windowEnd: string;
-  };
-  totals: { infractions: number; cards: number; alerts: number; duties: number };
-  timeline: StudentTimelineItem[];
+  seatNo?: number;
+  progress: { count: number; threshold: number; shortfall: number; windowStart: string; windowEnd: string };
+  totals: { infractions: number; alerts: number; duties: number };
+  history: InfractionRow[];
+  alerts: AlertRow[];
   restrictedToday: boolean;
+}
+
+/** 公開看板（去識別化；由後端產生，前端只讀這一份） */
+export interface PublicBoardData {
+  enabled: boolean;
+  date: string;
+  updatedAt: string;
+  stats: {
+    restrictedCount: number;
+    openAlerts: number;
+    observersToday: number;
+    infractionsToday: number;
+    infractions14d: number;
+  };
+  trend: Array<{ date: string; safety: number; kindWords: number }>;
+  hotspots: Array<{ name: string; count: number }>;
+  roster?: Array<{ className: string; seatNo: number | null; reasons: RestrictionReason[] }>;
+  observers?: Array<{
+    className: string;
+    seatNo: number | null;
+    periodsDone: number;
+    totalPeriods: number;
+  }>;
 }
 
 export interface CreateInfractionInput {
@@ -230,15 +183,5 @@ export interface CreateInfractionInput {
   typeCode: string;
   locationCode: string;
   periodNo: number;
-  occurredAt?: string;
-  locationDetail?: string;
-  description?: string;
-}
-
-export interface ReviewInput {
-  cardId: string;
-  decision: 'SIGNED' | 'RETURNED';
-  comment?: string;
-  teacherActivityPriority?: boolean;
-  exemptReason?: string;
+  note?: string;
 }

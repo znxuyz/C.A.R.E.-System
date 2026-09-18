@@ -1,9 +1,8 @@
 /**
  * 下課管制（每日帳）服務
  *
- * 資料模型選擇：`recessRestrictions/{studentId}_{YYYY-MM-DD}`（每生每日一筆）
- *  - 學務處最常問的問題是「今天有哪些人要管制？」→ 單欄位查詢 `date == today` 即可，
- *    無需雙欄位範圍查詢，成本最低且易於做班級統計。
+ * 資料模型：`recessRestrictions/{studentId}_{YYYY-MM-DD}`（每生每日一筆）
+ *  - 學務處最常問「今天有哪些人要管制？」→ 單欄位查詢 `date == today`。
  *  - 自然鍵天然去重：同日多次違規只會累加 reasons，不會重複扣權益。
  *  - 正向管教：`allowWaterAndRestroom` 永遠為 true，UI 固定顯示「可正常飲水與如廁」。
  */
@@ -39,6 +38,7 @@ export async function freezeRecess(
       studentName: input.student.name,
       classId: input.student.classId,
       className: input.student.className,
+      seatNo: input.student.seatNo ?? null,
       date: input.date,
       reasons: FieldValue.arrayUnion(input.reason),
       sourceRefs: FieldValue.arrayUnion({
@@ -61,8 +61,8 @@ export async function freezeRecess(
 /**
  * 解除管制。
  * 僅當該日所有管制來源都已排除時才真正解鎖：
- * 例如同日既有反思卡未完成、又是安全觀察員值勤日，
- * 完成反思卡只會移除 INFRACTION_REFLECTION 這個來源。
+ * 例如同日既有未回收的反思卡、又是安全觀察員值勤日，
+ * 回收反思卡只會移除 INFRACTION_PAPER 這個來源。
  */
 export async function liftRestriction(
   firestore: Firestore,
@@ -101,7 +101,7 @@ export async function liftRestriction(
   });
 }
 
-/** 生教組儀表板：今日管制名單 */
+/** 今日（或指定日）管制名單 */
 export async function listRestrictionsOn(
   firestore: Firestore,
   date: SchoolDate,
@@ -113,14 +113,27 @@ export async function listRestrictionsOn(
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<RecessRestriction, 'id'>) }));
 }
 
-/** 學生自助查詢：我今天可以自由下課嗎？ */
-export async function isRestricted(
+/** 解鎖日之後仍存在的管制帳一併解除（安全觀察員結案用） */
+export async function liftFrom(
   firestore: Firestore,
-  studentId: string,
-  date: SchoolDate,
-): Promise<boolean> {
+  params: { studentId: string; fromDate: SchoolDate; reason: RestrictionReason; note: string },
+  clock: Clock,
+): Promise<void> {
   const snap = await col(firestore, COLLECTIONS.recessRestrictions)
-    .doc(restrictionId(studentId, date))
+    .where('studentId', '==', params.studentId)
+    .where('status', '==', 'ACTIVE')
+    .where('date', '>=', params.fromDate)
     .get();
-  return snap.exists && snap.get('status') === 'ACTIVE';
+  for (const doc of snap.docs) {
+    await liftRestriction(
+      firestore,
+      {
+        studentId: params.studentId,
+        date: doc.get('date') as SchoolDate,
+        reason: params.reason,
+        note: params.note,
+      },
+      clock,
+    );
+  }
 }

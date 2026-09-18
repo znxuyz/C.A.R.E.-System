@@ -15,39 +15,39 @@ import { formatDate, weekdayLabel } from '../lib/format.ts';
 export interface TrendPoint {
   date: string;
   safety: number;
-  words: number;
+  kindWords: number;
 }
 
 const PLOT_HEIGHT = 120;
 
 export function TrendChart({ data }: { data: TrendPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
-  const max = Math.max(1, ...data.map((point) => point.safety + point.words));
+  const max = Math.max(1, ...data.map((point) => point.safety + point.kindWords));
 
   return (
     <div className="chart">
       <div className="legend">
         <span className="legend__item">
           <span className="legend__swatch" style={{ background: 'var(--series-1)' }} aria-hidden="true" />
-          校園安全反思卡
+          走廊奔跑（安全卡）
         </span>
         <span className="legend__item">
           <span className="legend__swatch" style={{ background: 'var(--series-2)' }} aria-hidden="true" />
-          口說好話反思卡
+          口出穢言（好話卡）
         </span>
         <span className="spacer" />
-        <span className="axis-note">單位：張／日・軸高 {max} 張</span>
+        <span className="axis-note">單位：次／日・軸高 {max} 次</span>
       </div>
 
       <div
         className="trend"
         role="img"
-        aria-label={`近 ${data.length} 天每日反思卡張數趨勢，最高 ${max} 張`}
+        aria-label={`近 ${data.length} 天每日違規次數趨勢，最高 ${max} 張`}
       >
         {data.map((point, index) => {
-          const total = point.safety + point.words;
+          const total = point.safety + point.kindWords;
           const safetyH = (point.safety / max) * PLOT_HEIGHT;
-          const wordsH = (point.words / max) * PLOT_HEIGHT;
+          const wordsH = (point.kindWords / max) * PLOT_HEIGHT;
           const dim = hover !== null && hover !== index;
           return (
             <div
@@ -85,11 +85,11 @@ export function TrendChart({ data }: { data: TrendPoint[] }) {
                   </div>
                   <div className="row" style={{ gap: 6 }}>
                     <span className="legend__swatch" style={{ background: 'var(--series-1)' }} />
-                    安全卡 <strong>{point.safety}</strong> 張
+                    安全卡 <strong>{point.safety}</strong> 次
                   </div>
                   <div className="row" style={{ gap: 6 }}>
                     <span className="legend__swatch" style={{ background: 'var(--series-2)' }} />
-                    好話卡 <strong>{point.words}</strong> 張
+                    好話卡 <strong>{point.kindWords}</strong> 次
                   </div>
                 </div>
               )}
@@ -107,8 +107,8 @@ export function TrendChart({ data }: { data: TrendPoint[] }) {
             <thead>
               <tr>
                 <th>日期</th>
-                <th>校園安全反思卡</th>
-                <th>口說好話反思卡</th>
+                <th>走廊奔跑</th>
+                <th>口出穢言</th>
                 <th>合計</th>
               </tr>
             </thead>
@@ -119,8 +119,8 @@ export function TrendChart({ data }: { data: TrendPoint[] }) {
                     {point.date}（{weekdayLabel(point.date)}）
                   </td>
                   <td className="num">{point.safety}</td>
-                  <td className="num">{point.words}</td>
-                  <td className="num cell-strong">{point.safety + point.words}</td>
+                  <td className="num">{point.kindWords}</td>
+                  <td className="num cell-strong">{point.safety + point.kindWords}</td>
                 </tr>
               ))}
             </tbody>

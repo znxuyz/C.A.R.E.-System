@@ -1,12 +1,12 @@
 /**
- * 違規事件登錄與通報服務
+ * 違規登錄與紙本回收服務
  *
- * 規格：
- *  - 生教組、糾察隊或巡堂教師登錄違規（學號/姓名、違規類型、地點、時間）。
- *  - 登錄成功後：① 自動凍結該生「當日」自由下課權限
- *                ② 發送 App 推播 / Email 通知該班導師
- *  - 同時依違規類型自動建立對應反思卡（走廊奔跑 → 校園安全反思卡；
- *    口出穢言 → 口說好話反思卡），學生登入即可填寫。
+ * 流程（生教組長一人操作）：
+ *   登錄違規（學號、類型、地點、節次）
+ *     → 自動凍結該生當日自由下課、發放對應紙本反思卡
+ *     → 自動回溯 15 天判定是否達再犯門檻
+ *   紙本反思卡回收 → 標記回收 → 當日解除下課管制
+ *   誤報可撤銷、班級活動優先可免記，皆不計入再犯
  */
 import type { Firestore } from 'firebase-admin/firestore';
 import { COLLECTIONS, col } from '../data/collections.js';
@@ -19,21 +19,24 @@ import {
   writeAuditLog,
   type StudentRecord,
 } from '../data/repositories.js';
+import {
+  assertCanAnnotate,
+  assertCanReturnPaper,
+  unlockDateForPaperReturn,
+} from '../domain/caseRules.js';
 import { toSchoolDate } from '../domain/dates.js';
 import {
-  CASE_STATUS,
   INFRACTION_STATUS,
+  PAPER_CARD_LABEL,
   RESTRICTION_REASONS,
-  type FormKind,
   type Infraction,
-  type ReflectionCard,
-  type Role,
+  type PaperCard,
 } from '../domain/types.js';
 import type { Clock } from '../lib/clock.js';
 import { invalid, notFound } from '../lib/errors.js';
-import { notify, resolveRecipients } from '../notifications/notifier.js';
+import { queueHomeroomEmail } from '../notifications/email.js';
+import { evaluateAndTrigger, type EvaluateResult } from './recidivismService.js';
 import { freezeRecess, liftRestriction } from './restrictionService.js';
-import { evaluateAndTrigger } from './recidivismService.js';
 
 export interface LogInfractionInput {
   /** 二者擇一：學號（現場最常用）或學生文件 ID */
@@ -44,26 +47,27 @@ export interface LogInfractionInput {
   occurredAt?: string;
   periodNo?: number;
   locationCode: string;
-  locationDetail?: string;
-  description?: string;
-  reporter: { uid: string; name: string; role: Role };
+  note?: string;
+  actor: { uid: string; name: string };
 }
 
 export interface LogInfractionResult {
   infractionId: string;
-  reflectionCardId: string;
+  studentId: string;
+  studentName: string;
+  className: string;
+  paperCard: PaperCard;
+  paperCardLabel: string;
   restrictionId: string;
-  formKind: FormKind;
-  notifiedTeacher: boolean;
+  recidivism: EvaluateResult;
 }
 
 interface InfractionTypeConfig {
   code: string;
   name: string;
-  formTemplateId: string;
-  formKind: FormKind;
-  countsTowardRecidivism: boolean;
-  active: boolean;
+  paperCard: PaperCard;
+  countsTowardRecidivism?: boolean;
+  active?: boolean;
 }
 
 export async function logInfraction(
@@ -82,10 +86,9 @@ export async function logInfraction(
         throw notFound(`學號 ${input.studentNo} 的學生`);
       })());
 
-  const [typeSnap, locationSnap, klass, settings] = await Promise.all([
+  const [typeSnap, locationSnap, settings] = await Promise.all([
     col(firestore, COLLECTIONS.infractionTypes).doc(input.typeCode).get(),
     col(firestore, COLLECTIONS.locations).doc(input.locationCode).get(),
-    getClass(firestore, student.classId),
     loadSettings(firestore),
   ]);
 
@@ -93,17 +96,10 @@ export async function logInfraction(
   const type = { code: typeSnap.id, ...(typeSnap.data() as Omit<InfractionTypeConfig, 'code'>) };
   if (type.active === false) throw invalid(`違規類型 ${type.name} 已停用`);
 
-  const templateSnap = await col(firestore, COLLECTIONS.formTemplates)
-    .doc(type.formTemplateId)
-    .get();
-  if (!templateSnap.exists) throw notFound(`表單模板 ${type.formTemplateId}`);
-
   const now = clock.now();
   const occurredAt = input.occurredAt ?? now;
   const occurredOn = toSchoolDate(occurredAt, settings.timezone);
-
   const infractionRef = col(firestore, COLLECTIONS.infractions).doc();
-  const cardRef = col(firestore, COLLECTIONS.reflectionCards).doc();
 
   const infraction: Omit<Infraction, 'id'> = {
     studentId: student.id,
@@ -111,143 +107,177 @@ export async function logInfraction(
     studentName: student.name,
     classId: student.classId,
     className: student.className,
+    seatNo: student.seatNo,
     typeCode: type.code,
     typeName: type.name,
-    formKind: type.formKind,
+    paperCard: type.paperCard,
     occurredAt,
     occurredOn,
     periodNo: input.periodNo ?? 0,
     locationCode: input.locationCode,
     locationName: (locationSnap.get('name') as string) ?? input.locationCode,
-    locationDetail: input.locationDetail,
-    description: input.description,
-    reporter: input.reporter,
+    note: input.note,
+    recordedBy: input.actor,
     status: INFRACTION_STATUS.OPEN,
-    reflectionCardId: cardRef.id,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const card: Omit<ReflectionCard, 'id'> = {
-    infractionId: infractionRef.id,
-    studentId: student.id,
-    studentNo: student.studentNo,
-    studentName: student.name,
-    classId: student.classId,
-    templateId: templateSnap.id,
-    templateVersion: (templateSnap.get('version') as number) ?? 1,
-    formKind: type.formKind,
-    status: CASE_STATUS.DRAFT,
-    // 累犯基準日 = 違規發生日（非填寫日），避免補填造成視窗漂移
-    countOn: occurredOn,
     countsTowardRecidivism: type.countsTowardRecidivism !== false,
     consumedByAlertId: null,
-    answers: {},
-    approvals: [],
-    returnCount: 0,
     createdAt: now,
     updatedAt: now,
   };
+  await infractionRef.set(infraction);
 
-  // 違規事件與反思卡一次寫入，避免出現「有事件卻無卡可填」的中間態
-  const batch = firestore.batch();
-  batch.set(infractionRef, infraction);
-  batch.set(cardRef, card);
-  await batch.commit();
-
-  // ① 凍結當日自由下課
+  // ① 凍結當日自由下課，待紙本反思卡回收
   const restrictionDocId = await freezeRecess(
     firestore,
     {
       student,
       date: occurredOn,
-      reason: RESTRICTION_REASONS.INFRACTION_REFLECTION,
+      reason: RESTRICTION_REASONS.INFRACTION_PAPER,
       periods: [],
       sourceRef: { infractionId: infractionRef.id },
-      note: `${type.name}｜待完成${templateSnap.get('title') ?? '反思卡'}`,
+      note: `${type.name}｜待回收${PAPER_CARD_LABEL[type.paperCard]}`,
     },
     clock,
   );
 
-  // ② 通知班導師（App 推播 + Email）
-  const recipients = await resolveRecipients(firestore, 'HOMEROOM_TEACHER', {
-    classId: student.classId,
-  });
-  if (recipients.length > 0) {
-    await notify(firestore, {
-      templateCode: 'INFRACTION_LOGGED',
-      audience: 'HOMEROOM_TEACHER',
-      recipients,
-      context: {
-        studentName: student.name,
-        studentNo: student.studentNo,
-        className: student.className,
+  // ② 回溯 15 天判定再犯
+  const recidivism = await evaluateAndTrigger(
+    firestore,
+    {
+      studentId: student.id,
+      asOf: occurredOn,
+      triggerInfractionId: infractionRef.id,
+      student,
+      settings,
+    },
+    clock,
+  );
+
+  // ③ 選用：Email 通知導師（預設關閉，見 settings.emailHomeroom）
+  if (settings.emailHomeroom) {
+    const klass = await getClass(firestore, student.classId).catch(() => null);
+    if (klass?.homeroomEmail) {
+      await queueHomeroomEmail(firestore, {
+        to: klass.homeroomEmail,
+        student,
         typeName: type.name,
+        paperCardLabel: PAPER_CARD_LABEL[type.paperCard],
         locationName: infraction.locationName,
-        occurredAt: occurredAt,
+        occurredAt,
         periodNo: infraction.periodNo,
-        cardTitle: templateSnap.get('title') as string,
-      },
-      relatedRef: { kind: 'infractions', id: infractionRef.id },
-      now,
-      channels: settings.notifications,
-    });
+        recidivismCount: recidivism.count,
+        threshold: settings.recidivismThreshold,
+        now,
+      });
+    }
   }
 
   await writeAuditLog(firestore, {
-    actorUid: input.reporter.uid,
-    actorName: input.reporter.name,
+    actorUid: input.actor.uid,
+    actorName: input.actor.name,
     action: 'INFRACTION_LOGGED',
-    entityType: 'infractions',
+    entityType: COLLECTIONS.infractions,
     entityId: infractionRef.id,
-    after: { ...infraction, reflectionCardId: cardRef.id },
+    after: infraction,
     at: now,
   });
 
   return {
     infractionId: infractionRef.id,
-    reflectionCardId: cardRef.id,
+    studentId: student.id,
+    studentName: student.name,
+    className: student.className,
+    paperCard: type.paperCard,
+    paperCardLabel: PAPER_CARD_LABEL[type.paperCard],
     restrictionId: restrictionDocId,
-    formKind: type.formKind,
-    notifiedTeacher: recipients.length > 0,
+    recidivism,
   };
 }
 
-/**
- * 撤銷違規（誤報）。
- * 生教組專屬；連動作廢反思卡、解除當日管制，並重新評估累犯進度
- * （若該卡已被警示認列，警示由生教組另行以 dismissAlert 處理）。
- */
-export async function voidInfraction(
+/** 紙本反思卡回收 → 當日解除下課管制 */
+export async function markPaperReturned(
   firestore: Firestore,
-  params: { infractionId: string; reason: string; actor: { uid: string; name: string } },
+  params: { infractionId: string; actor: { uid: string; name: string } },
+  clock: Clock,
+): Promise<{ status: string; unlockOn: string }> {
+  const infraction = await getInfraction(firestore, params.infractionId);
+  assertCanReturnPaper(infraction.status);
+
+  const now = clock.now();
+  const returnedOn = clock.today();
+  const unlockOn = unlockDateForPaperReturn(returnedOn);
+
+  await col(firestore, COLLECTIONS.infractions).doc(infraction.id).update({
+    status: INFRACTION_STATUS.DONE,
+    paperReturnedAt: now,
+    paperReturnedOn: returnedOn,
+    updatedAt: now,
+  });
+
+  // 解除「違規當日」與「回收當日」兩筆管制帳
+  // （當日回收時為同一筆；跨日回收時，先前每日續帳的管制也一併解除）
+  for (const date of new Set([infraction.occurredOn, unlockOn])) {
+    await liftRestriction(
+      firestore,
+      {
+        studentId: infraction.studentId,
+        date,
+        reason: RESTRICTION_REASONS.INFRACTION_PAPER,
+        note: '紙本反思卡已回收，解除下課管制',
+      },
+      clock,
+    );
+  }
+
+  await writeAuditLog(firestore, {
+    actorUid: params.actor.uid,
+    actorName: params.actor.name,
+    action: 'INFRACTION_PAPER_RETURNED',
+    entityType: COLLECTIONS.infractions,
+    entityId: infraction.id,
+    before: { status: infraction.status },
+    after: { status: INFRACTION_STATUS.DONE, returnedOn },
+    at: now,
+  });
+
+  return { status: INFRACTION_STATUS.DONE, unlockOn };
+}
+
+/**
+ * 免記（班級活動優先等事由）或撤銷（誤報）。
+ * 兩者都會：不計入再犯、解除當日管制、寫入稽核。
+ */
+export async function annotateInfraction(
+  firestore: Firestore,
+  params: {
+    infractionId: string;
+    action: 'EXEMPT' | 'VOID';
+    reason: string;
+    actor: { uid: string; name: string };
+  },
   clock: Clock,
 ): Promise<void> {
   const infraction = await getInfraction(firestore, params.infractionId);
-  const now = clock.now();
+  assertCanAnnotate(infraction.status, params.reason);
 
-  const batch = firestore.batch();
-  batch.update(col(firestore, COLLECTIONS.infractions).doc(infraction.id), {
-    status: INFRACTION_STATUS.VOIDED,
-    voidReason: params.reason,
+  const now = clock.now();
+  const isExempt = params.action === 'EXEMPT';
+  const status = isExempt ? INFRACTION_STATUS.EXEMPTED : INFRACTION_STATUS.VOIDED;
+
+  await col(firestore, COLLECTIONS.infractions).doc(infraction.id).update({
+    status,
+    countsTowardRecidivism: false,
+    ...(isExempt ? { exemptReason: params.reason } : { voidReason: params.reason }),
     updatedAt: now,
   });
-  if (infraction.reflectionCardId) {
-    batch.update(col(firestore, COLLECTIONS.reflectionCards).doc(infraction.reflectionCardId), {
-      status: CASE_STATUS.VOIDED,
-      countsTowardRecidivism: false,
-      updatedAt: now,
-    });
-  }
-  await batch.commit();
 
   await liftRestriction(
     firestore,
     {
       studentId: infraction.studentId,
       date: infraction.occurredOn,
-      reason: RESTRICTION_REASONS.INFRACTION_REFLECTION,
-      note: `違規撤銷：${params.reason}`,
+      reason: RESTRICTION_REASONS.INFRACTION_PAPER,
+      note: `${isExempt ? '免記' : '撤銷'}：${params.reason}`,
     },
     clock,
   );
@@ -255,20 +285,24 @@ export async function voidInfraction(
   await writeAuditLog(firestore, {
     actorUid: params.actor.uid,
     actorName: params.actor.name,
-    action: 'INFRACTION_VOIDED',
-    entityType: 'infractions',
+    action: isExempt ? 'INFRACTION_EXEMPTED' : 'INFRACTION_VOIDED',
+    entityType: COLLECTIONS.infractions,
     entityId: infraction.id,
     before: { status: infraction.status },
-    after: { status: INFRACTION_STATUS.VOIDED, reason: params.reason },
+    after: { status, reason: params.reason },
     at: now,
   });
 }
 
-/** 重新評估某生累犯（豁免/撤銷後呼叫），不觸發時僅回報進度 */
-export async function reevaluate(
+/** 待回收紙本反思卡的案件清單 */
+export async function listPendingPapers(
   firestore: Firestore,
-  params: { studentId: string; asOf: string; triggerCardId: string },
-  clock: Clock,
-) {
-  return evaluateAndTrigger(firestore, { ...params, triggerCardId: params.triggerCardId }, clock);
+  limit = 100,
+): Promise<Infraction[]> {
+  const snap = await col(firestore, COLLECTIONS.infractions)
+    .where('status', '==', INFRACTION_STATUS.OPEN)
+    .orderBy('occurredOn', 'desc')
+    .limit(limit)
+    .get();
+  return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<Infraction, 'id'>) }));
 }

@@ -10,7 +10,6 @@ on:
       - 'functions/**'
       - 'firestore.rules'
       - 'firestore.indexes.json'
-      - 'storage.rules'
       - 'firebase.json'
   workflow_dispatch:
 
@@ -35,6 +34,6 @@ jobs:
       - name: 部署 Firestore 規則、索引、Storage 規則與 Cloud Functions
         uses: w9jds/firebase-action@v13.24.1
         with:
-          args: deploy --only firestore:rules,firestore:indexes,storage,functions --project ${{ secrets.FIREBASE_PROJECT_ID }}
+          args: deploy --only firestore:rules,firestore:indexes,functions --project ${{ secrets.FIREBASE_PROJECT_ID }}
         env:
           GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

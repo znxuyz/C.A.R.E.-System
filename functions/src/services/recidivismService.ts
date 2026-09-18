@@ -1,23 +1,22 @@
 /**
- * 累犯偵測服務（Firestore 交易實作）
+ * 再犯偵測服務（Firestore 交易實作）
  * ==================================
  *
- * 規格：每筆違規成立時，回溯 15 天（含當天）該生反思卡填寫紀錄；
- *       達 3 張即發出警示並自動排入『安全觀察員追蹤清單』。
+ * 規格：每筆違規成立時，回溯 15 天（含當天）該生的違規紀錄；
+ *       達 3 次即發出警示並自動排入『安全觀察員追蹤清單』。
  *
  * 為何整段包在 Transaction 內：
- *   學生可能在同一節下課連續送出兩張卡（或生教組同時蓋章兩案），
- *   若「讀取視窗 → 判定 → 建立警示」不是原子操作，會產生兩張警示、
- *   導致同一波違規被罰兩次。交易 + 卡片認列（consumedByAlertId）
- *   讓整個流程具備幂等性。
+ *   同一節下課可能連續登錄兩筆違規；若「讀取視窗 → 判定 → 建立警示」
+ *   不是原子操作，會產生兩張警示、導致同一波違規被罰兩次。
+ *   交易 + 認列（consumedByAlertId）讓整個流程具備幂等性。
  */
 import type { Firestore } from 'firebase-admin/firestore';
 import { COLLECTIONS, col } from '../data/collections.js';
 import {
+  getStudent,
   loadCalendar,
   loadSettings,
-  getStudent,
-  readRecidivismWindowCards,
+  readRecidivismWindow,
   type StudentRecord,
 } from '../data/repositories.js';
 import { addDays, nextSchoolDay } from '../domain/dates.js';
@@ -30,12 +29,11 @@ import {
   type SystemSettings,
 } from '../domain/types.js';
 import type { Clock } from '../lib/clock.js';
-import { notify, resolveRecipients } from '../notifications/notifier.js';
 import { freezeRecess } from './restrictionService.js';
 
 export interface EvaluateResult {
   triggered: boolean;
-  cardCount: number;
+  count: number;
   shortfall: number;
   windowStart: SchoolDate;
   windowEnd: SchoolDate;
@@ -45,17 +43,16 @@ export interface EvaluateResult {
 }
 
 /**
- * 評估並（必要時）觸發累犯處分。
+ * 評估並（必要時）觸發再犯處分。
  *
- * @param asOf       基準日（= 觸發卡片的 countOn，亦即違規發生日）
- * @param triggerCardId 觸發本次評估的卡片
+ * @param asOf 基準日（= 觸發違規的 occurredOn）
  */
 export async function evaluateAndTrigger(
   firestore: Firestore,
   params: {
     studentId: string;
     asOf: SchoolDate;
-    triggerCardId: string;
+    triggerInfractionId: string;
     student?: StudentRecord;
     settings?: SystemSettings;
   },
@@ -74,29 +71,26 @@ export async function evaluateAndTrigger(
   const now = clock.now();
 
   const outcome = await firestore.runTransaction(async (tx) => {
-    const { windowStart, windowEnd } = {
-      windowStart: addDays(params.asOf, -(config.windowDays - 1)),
-      windowEnd: params.asOf,
-    };
+    const windowStart = addDays(params.asOf, -(config.windowDays - 1));
 
     // ---- 讀取階段（Firestore 要求交易內先讀後寫）----
-    const rows = await readRecidivismWindowCards(firestore, tx, {
+    const rows = await readRecidivismWindow(firestore, tx, {
       studentId: params.studentId,
       windowStart,
-      windowEnd,
+      windowEnd: params.asOf,
     });
 
     const evaluation = evaluateRecidivism({
       studentId: params.studentId,
       asOf: params.asOf,
-      cards: rows.map((r) => r.card),
+      infractions: rows.map((r) => r.infraction),
       config,
     });
 
     if (!evaluation.triggered) {
       return {
         triggered: false,
-        cardCount: evaluation.cardCount,
+        count: evaluation.count,
         shortfall: evaluation.shortfall,
         windowStart: evaluation.windowStart,
         windowEnd: evaluation.windowEnd,
@@ -110,7 +104,7 @@ export async function evaluateAndTrigger(
 
     const alert = buildAlert({
       evaluation,
-      triggerCardId: params.triggerCardId,
+      triggerInfractionId: params.triggerInfractionId,
       student: {
         id: student.id,
         studentNo: student.studentNo,
@@ -128,9 +122,9 @@ export async function evaluateAndTrigger(
       assignmentId: assignmentRef.id,
     });
 
-    // 認列卡片：本次計入的卡片不再參與後續視窗計數
+    // 認列：本次計入的違規不再參與後續視窗計數
     for (const row of rows) {
-      if (evaluation.countedCards.some((card) => card.id === row.card.id)) {
+      if (evaluation.counted.some((item) => item.id === row.infraction.id)) {
         tx.update(row.ref, { consumedByAlertId: alertRef.id, updatedAt: now });
       }
     }
@@ -153,7 +147,7 @@ export async function evaluateAndTrigger(
 
     return {
       triggered: true,
-      cardCount: evaluation.cardCount,
+      count: evaluation.count,
       shortfall: 0,
       windowStart: evaluation.windowStart,
       windowEnd: evaluation.windowEnd,
@@ -165,7 +159,7 @@ export async function evaluateAndTrigger(
 
   if (!outcome.triggered) return outcome;
 
-  // ---- 交易外的後續作業（凍結值勤日下課、發警示通知）----
+  // ---- 交易外：凍結值勤日的下課權限 ----
   await freezeRecess(
     firestore,
     {
@@ -179,74 +173,34 @@ export async function evaluateAndTrigger(
     clock,
   );
 
-  const context = {
-    studentName: student.name,
-    studentNo: student.studentNo,
-    className: student.className,
-    windowDays: settings.recidivismWindowDays,
-    cardCount: outcome.cardCount,
-    dutyOn: outcome.dutyOn,
-  };
-
-  for (const audience of ['DISCIPLINE_OFFICE', 'HOMEROOM_TEACHER'] as const) {
-    const recipients = await resolveRecipients(firestore, audience, {
-      classId: student.classId,
-      studentId: student.id,
-    });
-    if (recipients.length === 0) continue;
-    await notify(firestore, {
-      templateCode: 'RECIDIVISM_ALERT',
-      audience,
-      recipients,
-      context,
-      relatedRef: { kind: 'recidivismAlerts', id: outcome.alertId! },
-      now,
-      channels: settings.notifications,
-    });
-  }
-
-  const studentRecipients = await resolveRecipients(firestore, 'STUDENT', {
-    studentId: student.id,
-  });
-  if (studentRecipients.length > 0) {
-    await notify(firestore, {
-      templateCode: 'OBSERVER_ASSIGNED',
-      audience: 'STUDENT',
-      recipients: studentRecipients,
-      context,
-      relatedRef: { kind: 'observerAssignments', id: outcome.assignmentId! },
-      now,
-      channels: settings.notifications,
-    });
-  }
-
   return outcome;
 }
 
 /**
- * 只讀評估（不寫入），供生教組端「累犯進度 / 關注名單」即時顯示，
- * 以及豁免、撤銷後重新計算目前張數。
+ * 只讀評估（不寫入），供「再犯進度 / 關注名單」即時顯示，
+ * 以及免記、撤銷後重新計算目前次數。
  */
 export async function peekProgress(
   firestore: Firestore,
   params: { studentId: string; asOf: SchoolDate },
-): Promise<{ cardCount: number; shortfall: number; windowStart: SchoolDate; windowEnd: SchoolDate }> {
+): Promise<{ count: number; threshold: number; shortfall: number; windowStart: SchoolDate; windowEnd: SchoolDate }> {
   const settings = await loadSettings(firestore);
   const windowStart = addDays(params.asOf, -(settings.recidivismWindowDays - 1));
 
-  const snap = await col(firestore, COLLECTIONS.reflectionCards)
+  const snap = await col(firestore, COLLECTIONS.infractions)
     .where('studentId', '==', params.studentId)
     .where('countsTowardRecidivism', '==', true)
     .where('consumedByAlertId', '==', null)
-    .where('status', 'in', ['PENDING_TEACHER', 'PENDING_OFFICE', 'COMPLETED'])
-    .where('countOn', '>=', windowStart)
-    .where('countOn', '<=', params.asOf)
+    .where('status', 'in', ['OPEN', 'DONE'])
+    .where('occurredOn', '>=', windowStart)
+    .where('occurredOn', '<=', params.asOf)
     .get();
 
-  const cardCount = snap.size;
+  const count = snap.size;
   return {
-    cardCount,
-    shortfall: Math.max(0, settings.recidivismThreshold - cardCount),
+    count,
+    threshold: settings.recidivismThreshold,
+    shortfall: Math.max(0, settings.recidivismThreshold - count),
     windowStart,
     windowEnd: params.asOf,
   };

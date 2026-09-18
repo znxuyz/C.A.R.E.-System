@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { ROLE_LABEL, formatDate, weekdayLabel } from '../lib/format.ts';
+import { formatDate, weekdayLabel } from '../lib/format.ts';
 import { USE_MOCK } from '../lib/api.ts';
 import type { Session } from '../lib/types.ts';
 
@@ -42,7 +42,7 @@ export function AppShell({
           </div>
           <div>
             <div className="brand__name">C.A.R.E. System</div>
-            <div className="brand__sub">行為反思與追蹤</div>
+            <div className="brand__sub">違規登錄與再犯追蹤</div>
           </div>
         </div>
 
@@ -72,8 +72,10 @@ export function AppShell({
         <div className="sidebar__footer">
           <div>
             <strong>{session.name}</strong>
-            <div>{session.roles.map((role) => ROLE_LABEL[role] ?? role).join('・')}</div>
           </div>
+          <a href="#/" target="_blank" rel="noreferrer">
+            開啟公開看板 ↗
+          </a>
           {USE_MOCK && <div className="badge badge--warning">示範模式（模擬資料）</div>}
           <button className="btn btn--ghost" onClick={onSignOut} style={{ justifyContent: 'flex-start', padding: 0 }}>
             登出

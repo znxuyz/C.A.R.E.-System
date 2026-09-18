@@ -5,7 +5,7 @@ import { RESTRICTION_REASON_LABEL, formatDate, todayTaipei, weekdayLabel } from 
 import { Badge, EmptyState, Panel, WaterNotice } from '../components/ui.tsx';
 import type { RestrictionRow } from '../lib/types.ts';
 
-/** 下課管制名單（可查任一日；供學務處印出張貼於值班台） */
+/** 下課管制名單（可查任一日、可列印張貼於值班台） */
 export function RestrictionList() {
   const [date, setDate] = useState(todayTaipei());
   const [rows, setRows] = useState<RestrictionRow[] | null>(null);
@@ -47,21 +47,22 @@ export function RestrictionList() {
               <thead>
                 <tr>
                   <th>班級</th>
+                  <th>座號</th>
                   <th>學號</th>
                   <th>姓名</th>
                   <th>管制原因</th>
                   <th>節次</th>
                   <th>狀態</th>
-                  <th>備註</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
                     <td>{row.className}</td>
+                    <td className="num">{row.seatNo ?? '—'}</td>
                     <td className="num">{row.studentNo}</td>
                     <td className="cell-strong">
-                      <Link to={`/office/students/${row.studentId}`}>{row.studentName}</Link>
+                      <Link to={`/admin/students/${row.studentId}`}>{row.studentName}</Link>
                     </td>
                     <td>
                       <div className="row" style={{ gap: 6 }}>
@@ -90,7 +91,6 @@ export function RestrictionList() {
                         </Badge>
                       )}
                     </td>
-                    <td className="cell-sub">{row.note ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

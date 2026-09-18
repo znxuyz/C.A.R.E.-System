@@ -1,11 +1,11 @@
 /**
- * Firestore 安全規則測試
+ * Firestore 安全規則測試（單人操作版）
  *
- * 規則是本架構最主要的防線（業務寫入一律禁止、讀取依角色縮限），
- * 因此以模擬器實際驗證，而非只靠人工審閱。
+ * 重點驗證兩件事：
+ *  ① 未登入者只能讀到 publicBoard/today（去識別化摘要），其餘一律拒絕
+ *  ② 即使是生教組長本人，也不能從前端直接寫入任何業務集合
  *
  * 執行：npm run test:rules --workspace functions
- *      （等同 firebase emulators:exec --only firestore "vitest run --config vitest.emulator.config.ts"）
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -20,12 +20,9 @@ import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 
 let testEnv: RulesTestEnvironment;
 
-const OFFICE = { roles: ['DISCIPLINE_STAFF'], name: '王淑芬' };
-const TEACHER_701 = { roles: ['HOMEROOM_TEACHER'], name: '陳怡君' };
-const TEACHER_702 = { roles: ['HOMEROOM_TEACHER'], name: '林志偉' };
-const PATROL = { roles: ['PATROL'], name: '張家豪' };
-const STUDENT_A = { roles: ['STUDENT'], studentId: 'stu_701_01', name: '王小明' };
-const STUDENT_B = { roles: ['STUDENT'], studentId: 'stu_701_02', name: '李小華' };
+const STAFF = { roles: ['DISCIPLINE_STAFF'], name: '王淑芬' };
+const ADMIN = { roles: ['ADMIN'], name: '資訊組' };
+const OUTSIDER = { roles: [], name: '其他老師' };
 
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
@@ -44,16 +41,13 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await testEnv.clearFirestore();
-  // 以 Admin 權限（繞過規則）建立基礎資料
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await setDoc(doc(db, 'classes/cls_701'), {
-      name: '七年一班',
-      homeroomTeacherUid: 'uid_teacher_701',
-    });
-    await setDoc(doc(db, 'classes/cls_702'), {
-      name: '七年二班',
-      homeroomTeacherUid: 'uid_teacher_702',
+    await setDoc(doc(db, 'publicBoard/today'), {
+      date: '2026-09-18',
+      stats: { restrictedCount: 3, openAlerts: 1 },
+      trend: [],
+      hotspots: [],
     });
     await setDoc(doc(db, 'students/stu_701_01'), {
       studentNo: '1140101',
@@ -65,167 +59,101 @@ beforeEach(async () => {
       studentId: 'stu_701_01',
       classId: 'cls_701',
       status: 'OPEN',
-    });
-    await setDoc(doc(db, 'reflectionCards/card_1'), {
-      studentId: 'stu_701_01',
-      classId: 'cls_701',
-      status: 'DRAFT',
-      countOn: '2026-09-18',
+      occurredOn: '2026-09-18',
       countsTowardRecidivism: true,
       consumedByAlertId: null,
-      answers: {},
-    });
-    await setDoc(doc(db, 'reflectionCards/card_signed'), {
-      studentId: 'stu_701_01',
-      classId: 'cls_701',
-      status: 'PENDING_OFFICE',
-      answers: { what_happened: '已送出' },
     });
     await setDoc(doc(db, 'recessRestrictions/stu_701_01_2026-09-18'), {
       studentId: 'stu_701_01',
       date: '2026-09-18',
       status: 'ACTIVE',
     });
-    await setDoc(doc(db, 'recidivismAlerts/alert_1'), {
+    await setDoc(doc(db, 'recidivismAlerts/alert_1'), { studentId: 'stu_701_01', status: 'OPEN' });
+    await setDoc(doc(db, 'observerAssignments/asg_1'), {
       studentId: 'stu_701_01',
-      classId: 'cls_701',
-      status: 'OPEN',
+      dutyOn: '2026-09-19',
+      status: 'SCHEDULED',
     });
+    await setDoc(doc(db, 'settings/system'), { recidivismThreshold: 3 });
     await setDoc(doc(db, 'mail/mail_1'), { to: 'a@b.c' });
     await setDoc(doc(db, 'auditLogs/log_1'), { action: 'X' });
-    await setDoc(doc(db, 'settings/system'), { recidivismThreshold: 3 });
   });
 });
 
 const as = (uid: string, claims: object) =>
   testEnv.authenticatedContext(uid, claims as never).firestore();
 
-describe('未登入者', () => {
-  it('不可讀取任何業務資料', async () => {
+describe('未登入者（公開看板的觀眾）', () => {
+  it('可讀取去識別化的公開看板', async () => {
+    const db = testEnv.unauthenticatedContext().firestore();
+    await assertSucceeds(getDoc(doc(db, 'publicBoard/today')));
+  });
+
+  it('不可讀取任何業務資料（學生、違規、管制、警示）', async () => {
     const db = testEnv.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, 'students/stu_701_01')));
-    await assertFails(getDoc(doc(db, 'reflectionCards/card_1')));
+    await assertFails(getDoc(doc(db, 'infractions/inf_1')));
+    await assertFails(getDoc(doc(db, 'recessRestrictions/stu_701_01_2026-09-18')));
+    await assertFails(getDoc(doc(db, 'recidivismAlerts/alert_1')));
     await assertFails(getDoc(doc(db, 'settings/system')));
   });
-});
 
-describe('生教組', () => {
-  it('可讀取全校違規、反思卡、管制與警示', async () => {
-    const db = as('uid_office_01', OFFICE);
-    await assertSucceeds(getDoc(doc(db, 'infractions/inf_1')));
-    await assertSucceeds(getDoc(doc(db, 'reflectionCards/card_1')));
-    await assertSucceeds(getDoc(doc(db, 'recessRestrictions/stu_701_01_2026-09-18')));
-    await assertSucceeds(getDoc(doc(db, 'recidivismAlerts/alert_1')));
-  });
-
-  it('仍不可直接寫入業務集合（必須經 Cloud Functions）', async () => {
-    const db = as('uid_office_01', OFFICE);
-    await assertFails(updateDoc(doc(db, 'reflectionCards/card_signed'), { status: 'COMPLETED' }));
-    await assertFails(setDoc(doc(db, 'infractions/inf_new'), { studentId: 'stu_701_01' }));
-    await assertFails(
-      updateDoc(doc(db, 'recessRestrictions/stu_701_01_2026-09-18'), { status: 'LIFTED' }),
-    );
+  it('不可竄改公開看板', async () => {
+    const db = testEnv.unauthenticatedContext().firestore();
+    await assertFails(updateDoc(doc(db, 'publicBoard/today'), { stats: { restrictedCount: 0 } }));
   });
 });
 
-describe('班導師', () => {
-  it('可讀本班案件', async () => {
-    const db = as('uid_teacher_701', TEACHER_701);
-    await assertSucceeds(getDoc(doc(db, 'reflectionCards/card_1')));
-    await assertSucceeds(getDoc(doc(db, 'infractions/inf_1')));
-  });
-
-  it('不可讀他班案件', async () => {
-    const db = as('uid_teacher_702', TEACHER_702);
-    await assertFails(getDoc(doc(db, 'reflectionCards/card_1')));
+describe('已登入但無角色（其他老師誤入）', () => {
+  it('讀不到任何業務資料', async () => {
+    const db = as('uid_other', OUTSIDER);
     await assertFails(getDoc(doc(db, 'infractions/inf_1')));
-    await assertFails(getDoc(doc(db, 'recidivismAlerts/alert_1')));
-  });
-
-  it('不可自行簽章（改狀態）', async () => {
-    const db = as('uid_teacher_701', TEACHER_701);
-    await assertFails(updateDoc(doc(db, 'reflectionCards/card_1'), { status: 'PENDING_OFFICE' }));
-  });
-});
-
-describe('糾察隊', () => {
-  it('不可讀取學生歷程，也不可自行建立違規文件', async () => {
-    const db = as('uid_patrol_01', PATROL);
-    await assertFails(getDoc(doc(db, 'reflectionCards/card_1')));
-    await assertFails(setDoc(doc(db, 'infractions/inf_new'), { studentId: 'stu_701_01' }));
-  });
-});
-
-describe('學生', () => {
-  it('可讀自己的卡片與管制狀態', async () => {
-    const db = as('uid_stu_a', STUDENT_A);
-    await assertSucceeds(getDoc(doc(db, 'reflectionCards/card_1')));
-    await assertSucceeds(getDoc(doc(db, 'recessRestrictions/stu_701_01_2026-09-18')));
-    await assertSucceeds(getDoc(doc(db, 'students/stu_701_01')));
-  });
-
-  it('不可讀他人的卡片', async () => {
-    const db = as('uid_stu_b', STUDENT_B);
-    await assertFails(getDoc(doc(db, 'reflectionCards/card_1')));
     await assertFails(getDoc(doc(db, 'students/stu_701_01')));
   });
 
-  it('可暫存自己 DRAFT 卡片的 answers', async () => {
-    const db = as('uid_stu_a', STUDENT_A);
-    await assertSucceeds(
-      updateDoc(doc(db, 'reflectionCards/card_1'), {
-        answers: { what_happened: '第二節下課我在走廊奔跑' },
-        updatedAt: '2026-09-18T03:00:00.000Z',
-      }),
-    );
-  });
-
-  it('不可藉暫存夾帶狀態或累犯欄位', async () => {
-    const db = as('uid_stu_a', STUDENT_A);
-    await assertFails(
-      updateDoc(doc(db, 'reflectionCards/card_1'), { answers: {}, status: 'COMPLETED' }),
-    );
-    await assertFails(
-      updateDoc(doc(db, 'reflectionCards/card_1'), { answers: {}, countsTowardRecidivism: false }),
-    );
-    await assertFails(
-      updateDoc(doc(db, 'reflectionCards/card_1'), { answers: {}, consumedByAlertId: 'x' }),
-    );
-  });
-
-  it('已送出（PENDING_OFFICE）後不可再改作答', async () => {
-    const db = as('uid_stu_a', STUDENT_A);
-    await assertFails(
-      updateDoc(doc(db, 'reflectionCards/card_signed'), { answers: { what_happened: '改了' } }),
-    );
-  });
-
-  it('不可修改他人卡片', async () => {
-    const db = as('uid_stu_b', STUDENT_B);
-    await assertFails(updateDoc(doc(db, 'reflectionCards/card_1'), { answers: {} }));
-  });
-
-  it('不可自行解除下課管制', async () => {
-    const db = as('uid_stu_a', STUDENT_A);
-    await assertFails(
-      updateDoc(doc(db, 'recessRestrictions/stu_701_01_2026-09-18'), { status: 'LIFTED' }),
-    );
+  it('仍可看公開看板', async () => {
+    const db = as('uid_other', OUTSIDER);
+    await assertSucceeds(getDoc(doc(db, 'publicBoard/today')));
   });
 });
 
-describe('敏感集合', () => {
-  it('寄信佇列與稽核軌跡對一般角色完全關閉', async () => {
-    const office = as('uid_office_01', OFFICE);
-    await assertFails(getDoc(doc(office, 'mail/mail_1')));
-    await assertFails(getDoc(doc(office, 'auditLogs/log_1')));
-
-    const student = as('uid_stu_a', STUDENT_A);
-    await assertFails(getDoc(doc(student, 'mail/mail_1')));
+describe('生活教育組長', () => {
+  it('可讀取全部業務資料', async () => {
+    const db = as('uid_office', STAFF);
+    await assertSucceeds(getDoc(doc(db, 'students/stu_701_01')));
+    await assertSucceeds(getDoc(doc(db, 'infractions/inf_1')));
+    await assertSucceeds(getDoc(doc(db, 'recessRestrictions/stu_701_01_2026-09-18')));
+    await assertSucceeds(getDoc(doc(db, 'recidivismAlerts/alert_1')));
+    await assertSucceeds(getDoc(doc(db, 'observerAssignments/asg_1')));
+    await assertSucceeds(getDoc(doc(db, 'settings/system')));
   });
 
-  it('系統設定可讀但不可寫', async () => {
-    const db = as('uid_office_01', OFFICE);
-    await assertSucceeds(getDoc(doc(db, 'settings/system')));
+  it('不可從前端直接寫入業務集合（必須經 Cloud Functions）', async () => {
+    const db = as('uid_office', STAFF);
+    await assertFails(setDoc(doc(db, 'infractions/inf_new'), { studentId: 'stu_701_01' }));
+    await assertFails(updateDoc(doc(db, 'infractions/inf_1'), { status: 'DONE' }));
+    await assertFails(
+      updateDoc(doc(db, 'infractions/inf_1'), { consumedByAlertId: null, countsTowardRecidivism: false }),
+    );
+    await assertFails(
+      updateDoc(doc(db, 'recessRestrictions/stu_701_01_2026-09-18'), { status: 'LIFTED' }),
+    );
+    await assertFails(updateDoc(doc(db, 'recidivismAlerts/alert_1'), { status: 'DISMISSED' }));
     await assertFails(updateDoc(doc(db, 'settings/system'), { recidivismThreshold: 99 }));
+  });
+
+  it('不可讀寄信佇列，也不可讀稽核軌跡', async () => {
+    const db = as('uid_office', STAFF);
+    await assertFails(getDoc(doc(db, 'mail/mail_1')));
+    await assertFails(getDoc(doc(db, 'auditLogs/log_1')));
+  });
+});
+
+describe('系統管理者', () => {
+  it('可讀稽核軌跡，但同樣不可直接寫入', async () => {
+    const db = as('uid_admin', ADMIN);
+    await assertSucceeds(getDoc(doc(db, 'auditLogs/log_1')));
+    await assertFails(setDoc(doc(db, 'auditLogs/log_new'), { action: 'Y' }));
+    await assertFails(updateDoc(doc(db, 'settings/system'), { recidivismThreshold: 1 }));
   });
 });

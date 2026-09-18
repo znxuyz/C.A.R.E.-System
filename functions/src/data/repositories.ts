@@ -2,21 +2,19 @@
  * Firestore 讀寫層
  *
  * 約定：
- *  - 所有時間戳以 ISO-8601 字串儲存（伺服器產生），故文件結構 === 領域型別，
- *    無需額外 converter；日期欄位（countOn / date / dutyOn）為 `YYYY-MM-DD`。
- *  - 需要在交易中讀取的查詢一律回傳「文件快照 + 資料」，方便後續 tx.update。
+ *  - 所有時間戳以 ISO-8601 字串儲存（伺服器產生），故文件結構 === 領域型別。
+ *  - 日期欄位（occurredOn / date / dutyOn / unlockOn）為 `YYYY-MM-DD`（Asia/Taipei）。
  */
 import { FieldValue, type Firestore, type Transaction } from 'firebase-admin/firestore';
 import { createSchoolCalendar, type SchoolCalendar } from '../domain/dates.js';
 import {
   DEFAULT_SETTINGS,
   type Infraction,
-  type ReflectionCard,
   type SchoolDate,
   type SystemSettings,
 } from '../domain/types.js';
-import { COLLECTIONS, SETTINGS_DOC_ID, col, restrictionId } from './collections.js';
-import { COUNTABLE_CASE_STATUSES, type CountableCard } from '../domain/recidivism.js';
+import { COLLECTIONS, SETTINGS_DOC_ID, col } from './collections.js';
+import { COUNTABLE_STATUSES, type CountableInfraction } from '../domain/recidivism.js';
 import { notFound } from '../lib/errors.js';
 
 /* ------------------------------ 系統設定 ------------------------------ */
@@ -24,14 +22,19 @@ import { notFound } from '../lib/errors.js';
 export async function loadSettings(firestore: Firestore): Promise<SystemSettings> {
   const snap = await col(firestore, COLLECTIONS.settings).doc(SETTINGS_DOC_ID).get();
   if (!snap.exists) return DEFAULT_SETTINGS;
-  return { ...DEFAULT_SETTINGS, ...(snap.data() as Partial<SystemSettings>) };
+  const data = snap.data() as Partial<SystemSettings>;
+  return {
+    ...DEFAULT_SETTINGS,
+    ...data,
+    publicBoard: { ...DEFAULT_SETTINGS.publicBoard, ...(data.publicBoard ?? {}) },
+  };
 }
 
 /* ------------------------------- 校曆 -------------------------------- */
 
 /**
- * 載入校曆例外日（僅需載入未來/近期區間即可；預設週一~週五為上課日）。
- * schoolCalendar/{YYYY-MM-DD} → { isSchoolDay: boolean, note?: string }
+ * 載入校曆例外日（預設週一~週五為上課日）。
+ * schoolCalendar/{YYYY-MM-DD} → { date, isSchoolDay: boolean, note?: string }
  */
 export async function loadCalendar(
   firestore: Firestore,
@@ -60,8 +63,7 @@ export interface StudentRecord {
   name: string;
   classId: string;
   className: string;
-  guardianEmail?: string;
-  uid?: string;
+  seatNo?: number;
 }
 
 export async function getStudent(firestore: Firestore, studentId: string): Promise<StudentRecord> {
@@ -70,13 +72,13 @@ export async function getStudent(firestore: Firestore, studentId: string): Promi
   return { id: snap.id, ...(snap.data() as Omit<StudentRecord, 'id'>) };
 }
 
-/** 以學號查學生（登錄違規時常以學號輸入） */
+/** 以學號查學生（登錄違規時最常用） */
 export async function findStudentByNo(
   firestore: Firestore,
   studentNo: string,
 ): Promise<StudentRecord | null> {
   const snap = await col(firestore, COLLECTIONS.students)
-    .where('studentNo', '==', studentNo)
+    .where('studentNo', '==', studentNo.trim())
     .limit(1)
     .get();
   const doc = snap.docs[0];
@@ -86,8 +88,8 @@ export async function findStudentByNo(
 export interface ClassRecord {
   id: string;
   name: string;
-  homeroomTeacherUid?: string;
   homeroomTeacherName?: string;
+  homeroomEmail?: string;
 }
 
 export async function getClass(firestore: Firestore, classId: string): Promise<ClassRecord> {
@@ -107,84 +109,54 @@ export async function getInfraction(
   return { id: snap.id, ...(snap.data() as Omit<Infraction, 'id'>) };
 }
 
-/* ------------------------------- 反思卡 ------------------------------- */
-
-export async function getReflectionCard(
-  firestore: Firestore,
-  cardId: string,
-): Promise<ReflectionCard> {
-  const snap = await col(firestore, COLLECTIONS.reflectionCards).doc(cardId).get();
-  if (!snap.exists) throw notFound(`反思卡 ${cardId}`);
-  return { id: snap.id, ...(snap.data() as Omit<ReflectionCard, 'id'>) };
-}
-
 /**
- * 累犯視窗查詢（核心）
+ * 再犯視窗查詢（核心）
  *
  * 等價 SQL：
- *   SELECT id, student_id, count_on, form_kind, status,
+ *   SELECT id, student_id, occurred_on, type_name, status,
  *          counts_toward_recidivism, consumed_by_alert_id
- *     FROM reflection_cards
+ *     FROM infractions
  *    WHERE student_id = :studentId
- *      AND count_on BETWEEN :windowStart AND :windowEnd
+ *      AND occurred_on BETWEEN :windowStart AND :windowEnd
  *      AND counts_toward_recidivism = TRUE
  *      AND consumed_by_alert_id IS NULL
- *      AND status IN ('PENDING_TEACHER','PENDING_OFFICE','COMPLETED');
+ *      AND status IN ('OPEN','DONE');
  *
  * 需要之複合索引（見 firestore.indexes.json）：
- *   reflectionCards: studentId ASC, countsTowardRecidivism ASC,
- *                    consumedByAlertId ASC, status ASC, countOn ASC
+ *   infractions: studentId ASC, countsTowardRecidivism ASC,
+ *                consumedByAlertId ASC, status ASC, occurredOn ASC
  *
- * 必須在 Transaction 內讀取，才能與「認列卡片 / 建立警示」形成原子操作，
- * 避免兩張卡同時送出造成重複觸發（race condition）。
+ * 必須在 Transaction 內讀取，才能與「認列違規 / 建立警示」形成原子操作，
+ * 避免同時登錄兩筆造成重複觸發（race condition）。
  */
-export async function readRecidivismWindowCards(
+export async function readRecidivismWindow(
   firestore: Firestore,
   tx: Transaction,
   params: { studentId: string; windowStart: SchoolDate; windowEnd: SchoolDate; limit?: number },
-): Promise<Array<{ ref: FirebaseFirestore.DocumentReference; card: CountableCard }>> {
-  const query = col(firestore, COLLECTIONS.reflectionCards)
+): Promise<Array<{ ref: FirebaseFirestore.DocumentReference; infraction: CountableInfraction }>> {
+  const query = col(firestore, COLLECTIONS.infractions)
     .where('studentId', '==', params.studentId)
     .where('countsTowardRecidivism', '==', true)
     .where('consumedByAlertId', '==', null)
-    .where('status', 'in', [...COUNTABLE_CASE_STATUSES])
-    .where('countOn', '>=', params.windowStart)
-    .where('countOn', '<=', params.windowEnd)
-    .orderBy('countOn', 'asc')
+    .where('status', 'in', [...COUNTABLE_STATUSES])
+    .where('occurredOn', '>=', params.windowStart)
+    .where('occurredOn', '<=', params.windowEnd)
+    .orderBy('occurredOn', 'asc')
     .limit(params.limit ?? 50);
 
   const snap = await tx.get(query);
   return snap.docs.map((doc) => ({
     ref: doc.ref,
-    card: {
+    infraction: {
       id: doc.id,
       studentId: doc.get('studentId') as string,
-      countOn: doc.get('countOn') as SchoolDate,
-      formKind: doc.get('formKind'),
+      occurredOn: doc.get('occurredOn') as SchoolDate,
+      typeName: doc.get('typeName') as string,
       status: doc.get('status'),
       countsTowardRecidivism: doc.get('countsTowardRecidivism') as boolean,
       consumedByAlertId: (doc.get('consumedByAlertId') as string | null) ?? null,
     },
   }));
-}
-
-/** 生教組待蓋章佇列 */
-export async function listPendingOfficeCards(
-  firestore: Firestore,
-  limit = 50,
-): Promise<ReflectionCard[]> {
-  const snap = await col(firestore, COLLECTIONS.reflectionCards)
-    .where('status', '==', 'PENDING_OFFICE')
-    .orderBy('teacherSignedAt', 'asc')
-    .limit(limit)
-    .get();
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ReflectionCard, 'id'>) }));
-}
-
-/* ---------------------------- 下課管制每日帳 --------------------------- */
-
-export function restrictionRef(firestore: Firestore, studentId: string, date: SchoolDate) {
-  return col(firestore, COLLECTIONS.recessRestrictions).doc(restrictionId(studentId, date));
 }
 
 /* -------------------------------- 稽核 -------------------------------- */

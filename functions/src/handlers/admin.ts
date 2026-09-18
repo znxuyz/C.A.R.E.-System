@@ -1,49 +1,45 @@
 /**
- * 帳號與角色管理（僅 ADMIN 可呼叫）
+ * 帳號與設定管理（僅 ADMIN 可呼叫）
  *
- * 角色以 Firebase Auth custom claims 儲存，讓安全規則可直接引用
- * `request.auth.token.roles`，不必每次讀取 Firestore（省讀取成本）。
+ * 單人系統：通常只需在導入時指派一次角色給生活教育組長。
  */
 import { onCall } from 'firebase-functions/v2/https';
-import { COLLECTIONS, col } from '../data/collections.js';
-import { ROLES, type Role } from '../domain/types.js';
-import { auth, db } from '../lib/firebase.js';
-import { systemClock } from '../lib/clock.js';
+import { COLLECTIONS, SETTINGS_DOC_ID, col } from '../data/collections.js';
 import { writeAuditLog } from '../data/repositories.js';
-import { requireRole, toHttpsError } from './auth.js';
+import { ROLES, type Role } from '../domain/types.js';
+import { systemClock } from '../lib/clock.js';
+import { auth, db } from '../lib/firebase.js';
+import { rebuildPublicBoard } from '../services/publicBoardService.js';
+import { requireAdmin, toHttpsError } from './auth.js';
 
 const OPTS = { region: 'asia-east1' as const, cors: true };
 const VALID_ROLES = new Set<string>(Object.values(ROLES));
 
-/** 指派角色（生教組 / 導師 / 糾察隊 / 學生） */
+/** 指派角色（DISCIPLINE_STAFF / ADMIN） */
 export const setUserRoles = onCall(OPTS, async (request) => {
-  const caller = requireRole(request, ROLES.ADMIN);
+  const caller = requireAdmin(request);
   try {
     const uid = String(request.data?.uid ?? '');
     const roles = (request.data?.roles ?? []) as Role[];
-    const studentId = request.data?.studentId as string | undefined;
     const invalidRole = roles.find((role) => !VALID_ROLES.has(role));
     if (!uid || invalidRole) {
       throw new Error(invalidRole ? `未知角色 ${invalidRole}` : '缺少 uid');
     }
 
-    await auth().setCustomUserClaims(uid, { roles, ...(studentId ? { studentId } : {}) });
+    await auth().setCustomUserClaims(uid, { roles });
 
     const firestore = db();
     const now = systemClock.now();
-    if (!roles.includes(ROLES.STUDENT)) {
-      await col(firestore, COLLECTIONS.staff).doc(uid).set(
-        { roles, active: true, updatedAt: now },
-        { merge: true },
-      );
-    }
+    await col(firestore, COLLECTIONS.staff)
+      .doc(uid)
+      .set({ roles, active: true, updatedAt: now }, { merge: true });
     await writeAuditLog(firestore, {
       actorUid: caller.uid,
       actorName: caller.name,
       action: 'SET_USER_ROLES',
       entityType: 'auth',
       entityId: uid,
-      after: { roles, studentId },
+      after: { roles },
       at: now,
     });
     return { ok: true, uid, roles };
@@ -52,28 +48,46 @@ export const setUserRoles = onCall(OPTS, async (request) => {
   }
 });
 
-/** 註冊 / 更新推播 token（登入後由前端呼叫；任何已登入者皆可為自己註冊） */
-export const registerPushToken = onCall(OPTS, async (request) => {
-  const caller = requireRole(
-    request,
-    ROLES.STUDENT,
-    ROLES.HOMEROOM_TEACHER,
-    ROLES.DISCIPLINE_STAFF,
-    ROLES.PATROL,
-  );
+/** 更新系統設定（門檻、視窗、公開看板） */
+export const updateSettings = onCall(OPTS, async (request) => {
+  const caller = requireAdmin(request);
   try {
-    const token = String(request.data?.token ?? '');
-    if (!token) throw new Error('缺少推播 token');
+    const patch: Record<string, unknown> = {};
+    const data = request.data ?? {};
+    if (Number.isInteger(data.recidivismWindowDays)) {
+      patch.recidivismWindowDays = data.recidivismWindowDays;
+    }
+    if (Number.isInteger(data.recidivismThreshold)) {
+      patch.recidivismThreshold = data.recidivismThreshold;
+    }
+    if (typeof data.carryOverUnfinished === 'boolean') {
+      patch.carryOverUnfinished = data.carryOverUnfinished;
+    }
+    if (typeof data.emailHomeroom === 'boolean') patch.emailHomeroom = data.emailHomeroom;
+    if (data.publicBoard && typeof data.publicBoard === 'object') {
+      patch.publicBoard = {
+        enabled: Boolean(data.publicBoard.enabled),
+        showRoster: Boolean(data.publicBoard.showRoster),
+      };
+    }
+    if (Object.keys(patch).length === 0) throw new Error('沒有可更新的設定欄位');
+
     const firestore = db();
-    const isStudent = caller.roles.includes(ROLES.STUDENT);
-    const docId = isStudent ? (caller.studentId ?? caller.uid) : caller.uid;
-    const collection = isStudent ? COLLECTIONS.students : COLLECTIONS.staff;
-    const ref = col(firestore, collection).doc(docId);
-    const snap = await ref.get();
-    const tokens = new Set<string>((snap.get('fcmTokens') as string[] | undefined) ?? []);
-    tokens.add(token);
-    await ref.set({ fcmTokens: [...tokens], updatedAt: systemClock.now() }, { merge: true });
-    return { ok: true };
+    const now = systemClock.now();
+    await col(firestore, COLLECTIONS.settings)
+      .doc(SETTINGS_DOC_ID)
+      .set({ ...patch, updatedAt: now }, { merge: true });
+    await writeAuditLog(firestore, {
+      actorUid: caller.uid,
+      actorName: caller.name,
+      action: 'SETTINGS_UPDATED',
+      entityType: COLLECTIONS.settings,
+      entityId: SETTINGS_DOC_ID,
+      after: patch,
+      at: now,
+    });
+    await rebuildPublicBoard(firestore, systemClock);
+    return { ok: true, patch };
   } catch (error) {
     throw toHttpsError(error);
   }

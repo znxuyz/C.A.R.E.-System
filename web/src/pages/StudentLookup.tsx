@@ -1,32 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api.ts';
-import { formatDate, formatDateTime } from '../lib/format.ts';
+import {
+  INFRACTION_STATUS_LABEL,
+  INFRACTION_STATUS_TONE,
+  formatDate,
+  formatDateTime,
+} from '../lib/format.ts';
 import { Badge, Callout, EmptyState, Panel, StatTile } from '../components/ui.tsx';
 import type { StudentDetail } from '../lib/types.ts';
 
-const KIND_ICON: Record<string, string> = {
-  INFRACTION: '📋',
-  CARD: '📝',
-  ALERT: '⚠️',
-  DUTY: '👀',
-  REVIEW: '📄',
-};
-
-const KIND_DOT: Record<string, string> = {
-  INFRACTION: '',
-  CARD: ' timeline__dot--done',
-  ALERT: '',
-  DUTY: ' timeline__dot--wait',
-  REVIEW: ' timeline__dot--wait',
-};
-
-/** 學生查詢 + 個人行為歷程（輔導會議與親師溝通使用） */
+/** 學生查詢 + 個人違規歷程（輔導會議與親師溝通使用） */
 export function StudentLookup() {
   const { studentId } = useParams();
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<
-    Array<{ id: string; studentNo: string; name: string; className: string; windowCardCount?: number }>
+    Array<{ id: string; studentNo: string; name: string; className: string; seatNo?: number; windowCount?: number }>
   >([]);
   const [detail, setDetail] = useState<StudentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,14 +47,14 @@ export function StudentLookup() {
     return (
       <>
         <div className="row">
-          <Link className="btn btn--ghost" to="/office/students">
+          <Link className="btn btn--ghost" to="/admin/students">
             ← 返回查詢
           </Link>
         </div>
 
         <Panel
           title={`${detail.className} ${detail.name}`}
-          hint={`學號 ${detail.studentNo}${detail.guardianEmail ? `・家長信箱 ${detail.guardianEmail}` : ''}`}
+          hint={`學號 ${detail.studentNo}${detail.seatNo ? `・座號 ${detail.seatNo}` : ''}`}
           actions={
             detail.restrictedToday ? (
               <Badge tone="critical" dot>
@@ -80,53 +69,105 @@ export function StudentLookup() {
         >
           <div className="grid grid--kpi">
             <StatTile
-              label="累犯視窗內張數"
-              value={`${detail.progress.cardCount} / ${detail.progress.threshold}`}
+              label="15 天內再犯次數"
+              value={`${detail.progress.count} / ${detail.progress.threshold}`}
               foot={`${detail.progress.windowStart} ~ ${detail.progress.windowEnd}`}
               meter={{
-                value: detail.progress.cardCount,
+                value: detail.progress.count,
                 max: detail.progress.threshold,
-                tone: detail.progress.cardCount >= detail.progress.threshold ? 'critical' : 'warning',
+                tone: detail.progress.count >= detail.progress.threshold ? 'critical' : 'warning',
               }}
-              tone={detail.progress.cardCount >= detail.progress.threshold ? 'alert' : undefined}
+              tone={detail.progress.count >= detail.progress.threshold ? 'alert' : undefined}
             />
             <StatTile label="累計違規登錄" value={detail.totals.infractions} unit="件" />
-            <StatTile label="累計反思卡" value={detail.totals.cards} unit="張" />
+            <StatTile label="再犯警示" value={detail.totals.alerts} unit="次" />
             <StatTile label="安全觀察員值勤" value={detail.totals.duties} unit="次" />
           </div>
-          {detail.progress.shortfall > 0 && detail.progress.cardCount > 0 && (
+          {detail.progress.shortfall > 0 && detail.progress.count > 0 && (
             <Callout tone={detail.progress.shortfall <= 1 ? 'warning' : undefined}>
               <span aria-hidden="true">{detail.progress.shortfall <= 1 ? '⚠️' : 'ℹ️'}</span>
               <span>
-                再 <strong>{detail.progress.shortfall}</strong> 張反思卡即觸發累犯警示，
+                再 <strong>{detail.progress.shortfall}</strong> 次即觸發再犯警示，
                 建議提前安排晤談或正向支持措施。
               </span>
             </Callout>
           )}
         </Panel>
 
-        <Panel title="行為歷程" hint="含違規登錄、反思卡、警示與值勤紀錄">
-          {detail.timeline.length === 0 ? (
+        <Panel title="違規歷程" hint={`${detail.history.length} 筆`} flush>
+          {detail.history.length === 0 ? (
             <EmptyState title="尚無任何紀錄" />
           ) : (
-            <div className="timeline">
-              {detail.timeline.map((item) => (
-                <div className="timeline__item" key={`${item.kind}-${item.id}`}>
-                  <span className={`timeline__dot${KIND_DOT[item.kind] ?? ''}`} />
-                  <div>
-                    <div className="timeline__title">
-                      <span aria-hidden="true">{KIND_ICON[item.kind]} </span>
-                      {item.title}
-                    </div>
-                    <div className="timeline__meta">
-                      {formatDateTime(item.at)}・{item.detail}
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>類型</th>
+                    <th>地點・節次</th>
+                    <th>狀態</th>
+                    <th>紙本回收</th>
+                    <th>備註</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.history.map((row) => (
+                    <tr key={row.id}>
+                      <td>{formatDate(row.occurredOn)}</td>
+                      <td className="cell-strong">{row.typeName}</td>
+                      <td className="cell-sub">
+                        {row.locationName}
+                        {row.periodNo ? `・第 ${row.periodNo} 節` : ''}
+                      </td>
+                      <td>
+                        <Badge tone={INFRACTION_STATUS_TONE[row.status]} dot>
+                          {INFRACTION_STATUS_LABEL[row.status]}
+                        </Badge>
+                      </td>
+                      <td className="cell-sub">{formatDate(row.paperReturnedOn)}</td>
+                      <td className="cell-sub">
+                        {row.exemptReason ?? row.voidReason ?? row.note ?? '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </Panel>
+
+        {detail.alerts.length > 0 && (
+          <Panel title="再犯警示紀錄" flush>
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>觸發時間</th>
+                    <th>視窗</th>
+                    <th>次數</th>
+                    <th>值勤日</th>
+                    <th>狀態</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.alerts.map((alert) => (
+                    <tr key={alert.id}>
+                      <td className="cell-sub">{formatDateTime(alert.triggeredAt)}</td>
+                      <td className="cell-sub">
+                        {alert.windowStart} ~ {alert.windowEnd}
+                      </td>
+                      <td className="num">
+                        {alert.count} / {alert.threshold}
+                      </td>
+                      <td>{alert.dutyOn ? formatDate(alert.dutyOn) : '—'}</td>
+                      <td>{alert.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        )}
       </>
     );
   }
@@ -149,9 +190,10 @@ export function StudentLookup() {
               <thead>
                 <tr>
                   <th>班級</th>
+                  <th>座號</th>
                   <th>學號</th>
                   <th>姓名</th>
-                  <th>15 天內張數</th>
+                  <th>15 天內次數</th>
                   <th />
                 </tr>
               </thead>
@@ -159,19 +201,20 @@ export function StudentLookup() {
                 {results.map((row) => (
                   <tr key={row.id}>
                     <td>{row.className}</td>
+                    <td className="num">{row.seatNo ?? '—'}</td>
                     <td className="num">{row.studentNo}</td>
                     <td className="cell-strong">{row.name}</td>
                     <td className="num">
-                      {typeof row.windowCardCount === 'number' ? (
-                        <Badge tone={row.windowCardCount >= 2 ? 'critical' : 'neutral'}>
-                          {row.windowCardCount} / 3
+                      {typeof row.windowCount === 'number' ? (
+                        <Badge tone={row.windowCount >= 2 ? 'critical' : 'neutral'}>
+                          {row.windowCount} / 3
                         </Badge>
                       ) : (
                         '—'
                       )}
                     </td>
                     <td>
-                      <Link className="btn" to={`/office/students/${row.id}`}>
+                      <Link className="btn" to={`/admin/students/${row.id}`}>
                         查看歷程
                       </Link>
                     </td>
@@ -181,9 +224,6 @@ export function StudentLookup() {
             </table>
           </div>
         )}
-        <div className="small muted">
-          查詢日：{formatDate(new Date().toISOString())}｜歷程資料含違規登錄、反思卡、累犯警示與值勤紀錄。
-        </div>
       </div>
     </Panel>
   );
