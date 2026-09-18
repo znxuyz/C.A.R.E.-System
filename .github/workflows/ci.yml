@@ -26,5 +26,8 @@ jobs:
       - name: 單元測試（累犯演算法、日期視窗、工作流狀態機）
         run: npm test
 
+      - name: 安全規則測試（Firestore 模擬器）
+        run: npm run test:rules
+
       - name: 建置（Cloud Functions + 前端）
         run: npm run build

@@ -298,6 +298,12 @@ erDiagram
 - 讀取依角色縮限：生教組全校、導師限本班（查 `classes.homeroomTeacherUid`）、學生限本人。
 - `mail`（寄信佇列）對前端完全關閉；`auditLogs` 僅 `ADMIN` 可讀。
 
+規則以 Firestore 模擬器實測 16 項情境（見
+[`../functions/test/emulator/rules.test.ts`](../functions/test/emulator/rules.test.ts)），
+其中特別驗證：生教組即使有讀取權也無法直接寫入業務集合、導師不可讀他班案件、
+學生無法藉「暫存作答」夾帶 `status` / `countsTowardRecidivism` / `consumedByAlertId`。
+執行：`npm run test:rules`。
+
 ## 6. 關聯式（SQL）對應
 
 若校方要改用 Cloud SQL / PostgreSQL，或需匯出至 BigQuery 做期末統計：

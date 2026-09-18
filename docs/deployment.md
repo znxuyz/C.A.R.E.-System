@@ -19,7 +19,8 @@ npm ci
 npm run dev:web            # http://localhost:5173
 
 # ② 後端測試與型別檢查
-npm test                   # vitest 39 項
+npm test                   # vitest 39 項（純領域邏輯）
+npm run test:rules         # 16 項安全規則測試（自動啟動 Firestore 模擬器，需 Java）
 npm run typecheck
 
 # ③ 連本機模擬器開發
@@ -117,6 +118,7 @@ Pages 設定自訂網域後，在 Actions secrets 或 workflow 環境變數加�
 - [ ] 以測試學生跑一次完整流程：登錄 → 填卡 → 簽章 → 蓋章 → 確認當日解除管制
 - [ ] 連續建立 3 張卡，確認警示觸發、派單產生、第 4 張不再重複觸發
 - [ ] 索引部署完成（Console → Firestore → 索引，狀態為「已啟用」）
+- [ ] `npm run test:rules` 於部署後的規則版本仍全數通過
 
 ## 6. 維運
 

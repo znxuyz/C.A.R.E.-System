@@ -14,13 +14,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "serve": "npm run build && firebase emulators:start --only functions,firestore,auth",
-    "deploy": "npm run build && firebase deploy --only functions"
+    "deploy": "npm run build && firebase deploy --only functions",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-care-rules \"vitest run --config vitest.emulator.config.ts\""
   },
   "dependencies": {
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^6.1.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
