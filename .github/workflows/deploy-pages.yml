@@ -4,7 +4,8 @@ name: Deploy web to GitHub Pages
 # Firebase Web 設定屬公開識別資訊，但仍以 Repository secrets 管理，方便切換 dev / prod 專案。
 on:
   push:
-    branches: [main]
+    # 本 repo 目前以 claude/** 分支開發（亦為預設分支），故一併納入觸發
+    branches: [main, 'claude/**']
     paths:
       - 'web/**'
       - '.github/workflows/deploy-pages.yml'
@@ -52,6 +53,9 @@ jobs:
 
       - name: SPA 深層路徑 fallback（Pages 無伺服器端 rewrite）
         run: cp web/dist/index.html web/dist/404.html
+
+      - name: 停用 Jekyll（避免 Pages 把檔案當 Markdown 處理）
+        run: touch web/dist/.nojekyll
 
       - uses: actions/configure-pages@v5
 
