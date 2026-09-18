@@ -168,7 +168,7 @@ export interface ReviewInput {
   comment?: string;
   signatureHash?: string;
   /**
-   * 導師端「班級班級活動優先」勾選鈕：
+   * 導師端「導師班級活動優先」勾選鈕：
    * 勾選後該時段不計入處分，案件結案為 EXEMPTED 並解除當日管制。
    */
   teacherActivityPriority?: boolean;
