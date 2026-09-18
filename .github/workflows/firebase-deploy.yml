@@ -1,0 +1,40 @@
+name: Deploy backend to Firebase
+
+# 需在 repository secrets 設定：
+#  FIREBASE_SERVICE_ACCOUNT  服務帳號 JSON（角色：Firebase Admin + Cloud Functions Admin）
+#  FIREBASE_PROJECT_ID       目標專案 ID
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - 'storage.rules'
+      - 'firebase.json'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: 測試與建置
+        run: |
+          npm test
+          npm --prefix functions run build
+
+      - name: 部署 Firestore 規則、索引、Storage 規則與 Cloud Functions
+        uses: w9jds/firebase-action@v13.24.1
+        with:
+          args: deploy --only firestore:rules,firestore:indexes,storage,functions --project ${{ secrets.FIREBASE_PROJECT_ID }}
+        env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

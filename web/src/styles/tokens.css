@@ -1,0 +1,134 @@
+/**
+ * 設計代幣（Design Tokens）
+ *
+ * 色彩職責分離：
+ *  - 介面色（surface / ink / line）：介面結構，不帶語意。
+ *  - 狀態色（status）：good / warning / serious / critical，固定四色，
+ *    一律搭配文字或圖示，不以顏色單獨傳達訊息（無障礙要求）。
+ *  - 資料色（series）：圖表分類色，依固定順序指派，不循環重用。
+ *    slot 1 = 校園安全反思卡、slot 2 = 口說好話反思卡。
+ *    已以 CVD（色盲）模擬驗證：淺色 ΔE 24.7 / 深色 ΔE 26.8（門檻 ≥ 8）。
+ *  深色模式為「另一組刻度」而非自動反轉。
+ */
+:root {
+  color-scheme: light;
+
+  /* 介面 */
+  --surface-0: #f4f5f3;
+  --surface-1: #fcfcfb;
+  --surface-2: #ffffff;
+  --surface-sunken: #eceeea;
+  --ink-1: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #7b7a74;
+  --line-1: #e2e3df;
+  --line-2: #cfd1cb;
+
+  /* 品牌（教育場域：沉穩、可信） */
+  --brand-700: #0d366b;
+  --brand-600: #184f95;
+  --brand-500: #1c5cab;
+  --brand-400: #2a78d6;
+  --brand-100: #cde2fb;
+  --brand-ink-on: #ffffff;
+
+  /* 狀態（固定不隨主題調整色相） */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  --status-good-bg: #e7f6e7;
+  --status-warning-bg: #fdf3dd;
+  --status-serious-bg: #fceee7;
+  --status-critical-bg: #fae8e8;
+
+  /* 資料系列 */
+  --series-1: #2a78d6; /* 校園安全反思卡 */
+  --series-2: #eb6834; /* 口說好話反思卡 */
+  --series-1-soft: #cde2fb;
+  --series-2-soft: #fbdccf;
+
+  /* 版面 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-1: 0 1px 2px rgba(11, 11, 11, 0.06), 0 1px 3px rgba(11, 11, 11, 0.04);
+  --shadow-2: 0 4px 12px rgba(11, 11, 11, 0.08), 0 2px 4px rgba(11, 11, 11, 0.04);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --font-sans: 'Noto Sans TC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --surface-sunken: #0e0e0d;
+    --ink-1: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-3: #9a998f;
+    --line-1: #34342f;
+    --line-2: #45443e;
+
+    --brand-700: #cde2fb;
+    --brand-600: #9ec5f4;
+    --brand-500: #6da7ec;
+    --brand-400: #3987e5;
+    --brand-100: #184f95;
+    --brand-ink-on: #0b0b0b;
+
+    --status-good-bg: #10240f;
+    --status-warning-bg: #2c2209;
+    --status-serious-bg: #2d1c13;
+    --status-critical-bg: #2c1111;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-1-soft: #184f95;
+    --series-2-soft: #52220f;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #232322;
+  --surface-sunken: #0e0e0d;
+  --ink-1: #ffffff;
+  --ink-2: #c3c2b7;
+  --ink-3: #9a998f;
+  --line-1: #34342f;
+  --line-2: #45443e;
+
+  --brand-700: #cde2fb;
+  --brand-600: #9ec5f4;
+  --brand-500: #6da7ec;
+  --brand-400: #3987e5;
+  --brand-100: #184f95;
+  --brand-ink-on: #0b0b0b;
+
+  --status-good-bg: #10240f;
+  --status-warning-bg: #2c2209;
+  --status-serious-bg: #2d1c13;
+  --status-critical-bg: #2c1111;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-1-soft: #184f95;
+  --series-2-soft: #52220f;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.55);
+}

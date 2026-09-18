@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  verify:
+    name: 型別檢查 / 單元測試 / 建置
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安裝依賴
+        run: npm ci
+
+      - name: 型別檢查（functions + web）
+        run: npm run typecheck
+
+      - name: 單元測試（累犯演算法、日期視窗、工作流狀態機）
+        run: npm test
+
+      - name: 建置（Cloud Functions + 前端）
+        run: npm run build
