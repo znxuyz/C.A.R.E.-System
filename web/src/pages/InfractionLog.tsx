@@ -36,6 +36,7 @@ export function InfractionLog() {
     className: string;
     seatNo?: number;
     windowCount?: number;
+    active?: boolean;
   } | null>(null);
   const [typeCode, setTypeCode] = useState("");
   const [locationCode, setLocationCode] = useState("");
@@ -86,6 +87,7 @@ export function InfractionLog() {
               className: hit.className,
               seatNo: hit.seatNo,
               windowCount: hit.windowCount,
+              active: (hit as { active?: boolean }).active,
             }
           : null,
       );
@@ -97,7 +99,10 @@ export function InfractionLog() {
 
   // 回溯天數可於後台調整，畫面文案一律跟著設定走（預設 15 天）
   const windowDays = settings?.recidivismWindowDays ?? 15;
-  const canSubmit = Boolean(matched && typeCode && locationCode) && !busy;
+  // 已畢業／轉出的學生不得登錄（後端也會擋，這裡先讓現場知道）
+  const inactive = matched?.active === false;
+  const canSubmit =
+    Boolean(matched && !inactive && typeCode && locationCode) && !busy;
 
   const submit = async () => {
     if (!canSubmit || !matched) return;
@@ -209,6 +214,7 @@ export function InfractionLog() {
                       {matched.className}
                       {matched.seatNo ? ` ${matched.seatNo} 號` : ""}
                     </Badge>
+                    {inactive && <Badge tone="critical">已畢業／轉出</Badge>}
                     {typeof matched.windowCount === "number" &&
                       matched.windowCount > 0 && (
                         <Badge

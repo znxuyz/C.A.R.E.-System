@@ -69,8 +69,11 @@ import {
 } from "../core/domain/defaults.ts";
 import {
   importStudents,
-  parseRoster,
+  parseRosterRows,
+  removeLocation,
   seedBaseData,
+  upsertLocation,
+  type ExistingStudent,
 } from "../core/services/roster.ts";
 import type {
   AccessUser,
@@ -515,6 +518,7 @@ export const api = {
       name: d.get("name") as string,
       className: d.get("className") as string,
       seatNo: d.get("seatNo") as number | undefined,
+      active: d.get("active") !== false,
       windowCount: (
         (d.get("recidivismWindow") as Array<{ occurredOn: string }>) ?? []
       ).filter((entry) => entry.occurredOn >= windowStart).length,
@@ -634,6 +638,11 @@ export const api = {
     ]);
     const studentDoc = studentSnap.docs[0];
     if (!studentDoc) throw new Error(`查無學號 ${input.studentNo} 的學生`);
+    if (studentDoc.get("active") === false) {
+      throw new Error(
+        `${studentDoc.get("name")} 已不在名冊中（畢業或轉出），如需登錄請先重新匯入名冊`,
+      );
+    }
     // 類型／地點尚未匯入時，以內建預設值成案（避免現場因基本資料未建而卡住）
     const fallbackType = DEFAULT_INFRACTION_TYPES.find(
       (type) => type.code === input.typeCode,
@@ -767,20 +776,77 @@ export const api = {
     return seedBaseData(ctx());
   },
 
-  /** 匯入學生名冊（管理者）。回傳解析錯誤，讓使用者知道哪幾行要修 */
-  async importRoster(text: string) {
-    const { rows, errors } = parseRoster(text);
+  /**
+   * 地點維護：集合為空時代表仍在用內建預設值，
+   * 第一次異動前先把預設值寫進 Firestore，否則刪掉一個之後預設值又會整組冒出來。
+   */
+  async saveLocation(input: {
+    name: string;
+    isHotspot: boolean;
+    code?: string;
+  }) {
+    if (USE_MOCK) return { code: input.code ?? `loc_${input.name}`, ...input };
+    await materializeLocations();
+    return upsertLocation(ctx(), input);
+  },
+
+  async deleteLocation(code: string) {
+    if (USE_MOCK) return { ok: true };
+    await materializeLocations();
+    await removeLocation(ctx(), code);
+    return { ok: true };
+  },
+
+  /** 目前名冊（比對新舊名冊用；只取比對需要的欄位） */
+  async rosterSnapshot(): Promise<ExistingStudent[]> {
+    if (USE_MOCK) return [];
+    const snap = await getDocs(collection(db(), COL.students));
+    return snap.docs.map((d) => ({
+      id: d.id,
+      studentNo: (d.get("studentNo") as string) ?? "",
+      name: (d.get("name") as string) ?? "",
+      className: (d.get("className") as string) ?? "",
+      seatNo: (d.get("seatNo") as number | null) ?? null,
+      active: d.get("active") !== false,
+    }));
+  },
+
+  /**
+   * 匯入學生名冊（管理者）。
+   * `mode: 'REPLACE'` 為「完整名冊」：檔案中沒有的學生會被停用（畢業／轉出），
+   * 停用不是刪除，違規歷程全部保留。
+   */
+  async importRoster(text: string, mode: "MERGE" | "REPLACE" = "MERGE") {
+    return this.importRosterTable(
+      text.split(/\r?\n/).map((line) => line.split(/[,\t]/)),
+      mode,
+    );
+  },
+
+  /** 匯入已解析的表格（Excel／CSV 檔案上傳與貼上文字都走這條） */
+  async importRosterTable(
+    table: string[][],
+    mode: "MERGE" | "REPLACE" = "MERGE",
+  ) {
+    const { rows, errors } = parseRosterRows(table);
     if (rows.length === 0) {
       throw new Error(errors[0] ?? "沒有解析到任何學生資料");
     }
     if (USE_MOCK) {
       return {
         students: rows.length,
-        classes: new Set(rows.map((r) => r.className)).size,
+        classes: new Set(rows.map((row) => row.className)).size,
+        created: rows.length,
+        reclassed: 0,
+        deactivated: 0,
         errors,
       };
     }
-    const result = await importStudents(ctx(), rows);
+    const existing = await this.rosterSnapshot();
+    const result = await importStudents(ctx(), rows, {
+      existing,
+      deactivateMissing: mode === "REPLACE",
+    });
     return { ...result, errors };
   },
 
@@ -792,6 +858,12 @@ export const api = {
     return { ok: true };
   },
 };
+
+/** 地點集合仍為空（使用內建預設值）時，先寫入預設值再讓使用者增刪 */
+async function materializeLocations(): Promise<void> {
+  const snap = await getDocs(collection(db(), COL.locations));
+  if (snap.empty) await seedBaseData(ctx());
+}
 
 /** 每次異動後重建公開看板（失敗不影響主要操作） */
 async function refreshBoard(): Promise<void> {

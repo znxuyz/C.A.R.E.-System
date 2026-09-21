@@ -44,7 +44,7 @@ erDiagram
 | `settings` | `system` | 15 天 / 3 次 / 5 節、公開看板開關 | 直接讀取 |
 | `schoolCalendar` | `YYYY-MM-DD` | 假日與補課日（決定「隔日」） | 日期範圍 |
 | `classes` | `cls_701` | 班級（可選填導師姓名與信箱） | 直接讀取 |
-| `students` | `stu_701_01` | 學生主檔（含座號） | 學號比對 |
+| `students` | `stu_{學號}` | 學生主檔（含座號、`active`／`leftOn`：畢業轉出後停用而不刪除） | 學號比對 |
 | `staff` | Auth uid | **角色的真實來源**（安全規則以 get() 讀取判定） | 直接讀取 |
 | `systemState` | `dailySync` | 每日續帳的執行紀錄（取代排程函式） | 直接讀取 |
 | `accessGrants` | Google 信箱 | 以信箱預先授權的名單（只能讀自己那筆；管理者可讀全部） | 帳號管理頁 |
