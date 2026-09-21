@@ -26,14 +26,14 @@ jobs:
       - name: 安裝依賴
         run: npm ci
 
-      - name: 型別檢查（functions + web）
+      - name: 型別檢查
         run: npm run typecheck
 
-      - name: 單元測試（累犯演算法、日期視窗、工作流狀態機）
+      - name: 單元測試（再犯演算法、日期視窗、案件規則）
         run: npm test
 
       - name: 安全規則測試（Firestore 模擬器）
         run: npm run test:rules
 
-      - name: 建置（Cloud Functions + 前端）
+      - name: 建置前端
         run: npm run build

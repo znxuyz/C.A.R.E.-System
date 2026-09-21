@@ -8,7 +8,7 @@ import {
   nextSchoolDay,
   recidivismWindow,
   toSchoolDate,
-} from '../src/domain/dates.js';
+} from '../src/core/domain/dates.js';
 
 describe('校務日期（Asia/Taipei）', () => {
   it('UTC 深夜時點應歸屬台北的隔日', () => {

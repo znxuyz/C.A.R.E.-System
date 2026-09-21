@@ -186,7 +186,6 @@ export interface SystemSettings {
   observerPeriodNumbers: number[];
   carryOverUnfinished: boolean;
   publicBoard: { enabled: boolean; showRoster: boolean };
-  emailHomeroom: boolean;
 }
 
 /** 帳號授權清單的一列 */

@@ -51,7 +51,6 @@ const mockSettings: SystemSettings = {
   observerPeriodNumbers: [1, 2, 3, 4, 5],
   carryOverUnfinished: true,
   publicBoard: { enabled: true, showRoster: false },
-  emailHomeroom: false,
 };
 
 const mockUsers: AccessUser[] = [

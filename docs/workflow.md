@@ -42,7 +42,7 @@ sequenceDiagram
 - `EXEMPTED` / `VOIDED` 已結案，不可重複處理；`DONE` 仍可事後更正為免記或撤銷。
 - 免記與撤銷**必填事由**，寫入 `auditLogs`（`assertCanAnnotate`）。
 
-實作：[`functions/src/domain/caseRules.ts`](../functions/src/domain/caseRules.ts)（10 項單元測試）。
+實作：[`web/src/core/domain/caseRules.ts`](../web/src/core/domain/caseRules.ts)（10 項單元測試）。
 
 ## 3. 安全觀察員派單狀態
 
@@ -68,11 +68,12 @@ SCHEDULED ──首次報到──▶ IN_PROGRESS ──5 節完成──▶ DUT
 | 檢討書回收 | `unlockOn = nextSchoolDay(回收日)`；該日起不再續帳＝自動解鎖 |
 | 紙本逾日未回收 | 排程續帳到當日（拖延不等於免責，可由 `carryOverUnfinished` 關閉） |
 
-排程作業：[`functions/src/handlers/scheduled.ts`](../functions/src/handlers/scheduled.ts)
+每日續帳：[`web/src/core/services/dailySync.ts`](../web/src/core/services/dailySync.ts)
 
-| 排程 | 時間（Asia/Taipei） | 作用 |
-|---|---|---|
-| `dailyRollForward` | 上課日 07:10 | 未結案管制續帳、已達解鎖日者自動解鎖、重建公開看板 |
+免費方案沒有排程函式，因此改在**生教組端每天第一次開啟系統**時執行：
+未結案管制續帳、已達解鎖日者不再續帳（＝自動解鎖）、重建公開看板。
+以 `systemState/dailySync.lastRunOn` 記錄每天只跑一次；管制帳以「學生＋日期」為鍵，
+重複執行不會產生重複資料，連續幾天沒開系統，下次開啟時也會一併補上。
 
 ## 5. 正向管教的落實點
 

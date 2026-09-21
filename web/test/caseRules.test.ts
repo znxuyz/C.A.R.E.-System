@@ -6,9 +6,9 @@ import {
   isPending,
   unlockDateForPaperReturn,
   unlockDateForReviewReturn,
-} from '../src/domain/caseRules.js';
-import { createSchoolCalendar } from '../src/domain/dates.js';
-import { INFRACTION_STATUS } from '../src/domain/types.js';
+} from '../src/core/domain/caseRules.js';
+import { createSchoolCalendar } from '../src/core/domain/dates.js';
+import { INFRACTION_STATUS } from '../src/core/domain/types.js';
 
 describe('紙本反思卡回收', () => {
   it('待回收的案件可標記回收', () => {

@@ -45,8 +45,9 @@ erDiagram
 | `schoolCalendar` | `YYYY-MM-DD` | 假日與補課日（決定「隔日」） | 日期範圍 |
 | `classes` | `cls_701` | 班級（可選填導師姓名與信箱） | 直接讀取 |
 | `students` | `stu_701_01` | 學生主檔（含座號） | 學號比對 |
-| `staff` | Auth uid | 使用者與角色（通常 1–2 筆） | 直接讀取 |
-| `accessGrants` | Google 信箱 | 以信箱預先授權的名單（僅 Functions 可存取） | 帳號管理頁 |
+| `staff` | Auth uid | **角色的真實來源**（安全規則以 get() 讀取判定） | 直接讀取 |
+| `systemState` | `dailySync` | 每日續帳的執行紀錄（取代排程函式） | 直接讀取 |
+| `accessGrants` | Google 信箱 | 以信箱預先授權的名單（只能讀自己那筆；管理者可讀全部） | 帳號管理頁 |
 | `infractionTypes` | `RUN_IN_CORRIDOR` | 違規類型 → 對應紙本卡 | 依 `order` |
 | `locations` | `CORRIDOR_2F` | 校園地點、是否熱點 | 全取 |
 | `infractions` | auto | **違規事件（再犯計次來源）** | ★ 再犯視窗、待回收清單 |
@@ -68,7 +69,7 @@ erDiagram
   "observerPeriods": 5,            // 安全觀察員值勤節數
   "observerPeriodNumbers": [1,2,3,4,5],
   "timezone": "Asia/Taipei",
-  // 以下皆可由管理者在「系統設定」頁直接調整（updateSettings callable）
+  // 以下皆可由管理者在「系統設定」頁直接調整（安全規則會驗證範圍）
   "carryOverUnfinished": true,     // 紙本未回收時管制是否續行至隔日
   "publicBoard": {
     "enabled": true,
@@ -238,10 +239,14 @@ erDiagram
 - `publicBoard/{doc}`：`allow read: if true`（唯一匿名可讀），寫入一律拒絕。
 - 其餘集合：讀取需 `DISCIPLINE_STAFF` 或 `ADMIN`；`auditLogs` 僅 `ADMIN`；
   `mail` 對前端完全關閉。
-- **所有業務集合的寫入一律 `false`**，狀態變更只能經 Cloud Functions callable。
-- 以模擬器實測 9 項情境（見
-  [`../functions/test/emulator/rules.test.ts`](../functions/test/emulator/rules.test.ts)），
-  包含「生教組長即使有讀取權也無法直接寫入」與「未登入者只能讀公開看板」。
+- 本系統不使用 Cloud Functions，**安全規則是唯一防線**，因此除權限外還驗證：
+  登錄者須為本人、`createdAt/updatedAt` 必須等於 `request.time`（伺服器時間）、
+  違規的學生與發生日不可事後竄改、違規不可刪除、管制帳的
+  `allowWaterAndRestroom` 必須為 true、學生主檔只能更新再犯視窗快取、
+  使用者不可寫入超出授權的角色。
+- 以模擬器實測 **27 項**情境（見
+  [`../web/test/emulator/rules.test.ts`](../web/test/emulator/rules.test.ts)），
+  含匿名存取、提權嘗試、偽造登錄者、竄改時間戳、刪除違規、停用帳號等。
 
 ## 6. 關聯式（SQL）對應
 

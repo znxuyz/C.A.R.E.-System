@@ -1,36 +1,80 @@
 rules_version = '2';
 
 /**
- * C.A.R.E. System — Firestore 安全規則（單人操作版）
+ * C.A.R.E. System — Firestore 安全規則
  *
- * 授權模型
- *  - 只有兩種身分：DISCIPLINE_STAFF（生活教育組長）與 ADMIN。
- *    角色存於 Firebase Auth custom claims：request.auth.token.roles: string[]
- *  - 未登入者只能讀取一份文件：publicBoard/today
- *    （由 Cloud Functions 產生的**去識別化摘要**，不含姓名、學號或個別事件明細）
+ * 架構前提：本系統不使用 Cloud Functions（需付費方案），
+ * 所有業務邏輯在前端執行，因此**安全規則是唯一的防線**，
+ * 除了權限判定外也負責驗證每一筆寫入的形狀與關鍵欄位。
  *
- * 寫入原則
- *  - 所有業務寫入一律走 Cloud Functions callable（Admin SDK 繞過本規則），
- *    client 端完全無寫入權限。這確保伺服器時戳、再犯認列欄位
- *    （consumedByAlertId）與管制狀態不可被前端竄改。
+ * 角色來源：`staff/{uid}.roles`（而非 custom claims）。
+ *  - 優點：取消授權下一次請求即生效，不必等 token 過期。
+ *  - 代價：每次規則判定多一次文件讀取（同一請求內會快取）。
+ *
+ * 授權鏈：
+ *   seed 指令建立 accessGrants/{管理者信箱}
+ *     → 管理者 Google 登入後，前端讀「自己那筆」授權並建立 staff/{uid}
+ *       （規則驗證 roles 必須等於授權內容，無法自行提權）
+ *     → 管理者於帳號管理頁寫入其他人的 accessGrants
+ *
+ * 時間戳：所有 createdAt / updatedAt 須等於 request.time（serverTimestamp），
+ * 因此即使寫入端在前端，稽核時間仍無法造假。
  */
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    /* ----------------------------- 共用函式 ----------------------------- */
+    /* ----------------------------- 身分判定 ----------------------------- */
 
-    function roles() {
-      return request.auth != null && 'roles' in request.auth.token
-        ? request.auth.token.roles
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myEmail() {
+      return signedIn() && 'email' in request.auth.token
+        ? request.auth.token.email.lower()
+        : '';
+    }
+
+    function staffPath() {
+      return /databases/$(database)/documents/staff/$(request.auth.uid);
+    }
+
+    function myRoles() {
+      return signedIn() && exists(staffPath()) && get(staffPath()).data.active == true
+        ? get(staffPath()).data.roles
         : [];
     }
 
     function isStaff() {
-      return 'DISCIPLINE_STAFF' in roles() || 'ADMIN' in roles();
+      return 'DISCIPLINE_STAFF' in myRoles() || 'ADMIN' in myRoles();
     }
 
     function isAdmin() {
-      return 'ADMIN' in roles();
+      return 'ADMIN' in myRoles();
+    }
+
+    /* ----------------------------- 驗證輔助 ----------------------------- */
+
+    function isSchoolDate(value) {
+      return value is string && value.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    /** 時間戳必須由伺服器決定 */
+    function serverTime(field) {
+      return request.resource.data[field] == request.time;
+    }
+
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    function unchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    function validRoles(roles) {
+      return roles is list && roles.size() > 0
+        && roles.hasOnly(['ADMIN', 'DISCIPLINE_STAFF']);
     }
 
     /* --------------------- 公開唯讀看板（唯一匿名可讀） -------------------- */
@@ -38,89 +82,193 @@ service cloud.firestore {
     match /publicBoard/{docId} {
       // 內容為統計數字；僅在設定開啟 showRoster 時另含「班級＋座號」，永不含姓名
       allow read: if true;
-      allow write: if false;   // 僅 Cloud Functions 產生
+      allow write: if isStaff() && serverTime('updatedAt');
     }
 
-    /* --------------------------- 設定類（唯讀） --------------------------- */
+    /* ------------------------------ 授權名單 ------------------------------ */
 
-    match /settings/{docId} {
+    match /accessGrants/{email} {
+      // 只能讀自己的那一筆（登入後據此建立 staff 文件）；管理者可讀全部
+      allow get: if isAdmin() || (signedIn() && myEmail() == email);
+      allow list: if isAdmin();
+
+      allow create, delete: if isAdmin()
+        && request.resource.data.email == email
+        && validRoles(request.resource.data.roles);
+
+      allow update: if
+        (isAdmin() && validRoles(request.resource.data.roles))
+        // 本人領取授權時只能標記「已領取」
+        || (signedIn() && myEmail() == email
+            && onlyChanges(['claimedByUid', 'claimedAt'])
+            && request.resource.data.claimedByUid == request.auth.uid);
+    }
+
+    /* ------------------------------ 使用者 ------------------------------- */
+
+    /** 建立/更新自己的 staff 文件時，角色必須與授權名單完全一致 */
+    function grantMatches() {
+      return exists(/databases/$(database)/documents/accessGrants/$(myEmail()))
+        && get(/databases/$(database)/documents/accessGrants/$(myEmail())).data.active == true
+        && request.resource.data.roles
+             == get(/databases/$(database)/documents/accessGrants/$(myEmail())).data.roles;
+    }
+
+    match /staff/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isStaff());
+
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.email == myEmail()
+        && request.resource.data.active == true
+        && grantMatches();
+
+      allow update: if
+        // 本人重新領取（角色異動後重新登入）
+        (signedIn() && request.auth.uid == uid
+          && request.resource.data.active == true
+          && grantMatches())
+        // 管理者調整角色或停用
+        || (isAdmin() && request.resource.data.roles is list
+            && request.resource.data.roles.hasOnly(['ADMIN', 'DISCIPLINE_STAFF']));
+
+      allow delete: if false;
+    }
+
+    /* ------------------------------ 主檔資料 ------------------------------ */
+
+    match /students/{studentId} {
       allow read: if isStaff();
-      allow write: if false;   // 經 updateSettings callable
+      allow create, delete: if isAdmin();
+      // 生教組僅能更新再犯視窗快取（交易計數用），其餘欄位須管理者
+      allow update: if isAdmin() || (isStaff() && onlyChanges(['recidivismWindow']));
+    }
+
+    match /classes/{classId} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
     }
 
     match /infractionTypes/{code} {
       allow read: if isStaff();
-      allow write: if false;
+      allow write: if isAdmin();
     }
 
     match /locations/{code} {
       allow read: if isStaff();
-      allow write: if false;
+      allow write: if isAdmin();
     }
 
     match /schoolCalendar/{day} {
       allow read: if isStaff();
-      allow write: if false;
+      allow write: if isAdmin();
     }
 
-    /* ------------------------------ 人員主檔 ------------------------------ */
+    /* ------------------------------ 系統設定 ------------------------------ */
 
-    match /classes/{classId} {
+    match /settings/{docId} {
       allow read: if isStaff();
-      allow write: if false;
+      allow write: if isAdmin()
+        && request.resource.data.recidivismWindowDays is int
+        && request.resource.data.recidivismWindowDays >= 1
+        && request.resource.data.recidivismWindowDays <= 90
+        && request.resource.data.recidivismThreshold is int
+        && request.resource.data.recidivismThreshold >= 1
+        && request.resource.data.recidivismThreshold <= 20
+        && request.resource.data.observerPeriods is int
+        && request.resource.data.observerPeriods >= 1
+        && request.resource.data.observerPeriods <= 12
+        && serverTime('updatedAt');
     }
 
-    match /students/{studentId} {
+    /** 每日續帳的執行紀錄（取代排程函式） */
+    match /systemState/{docId} {
       allow read: if isStaff();
-      allow write: if false;
+      allow write: if isStaff() && serverTime('lastRunAt');
     }
 
-    match /staff/{uid} {
-      allow read: if isStaff();
-      allow write: if false;
-    }
-
-    /**
-     * 以 Google 信箱預先授權的名單。
-     * 含尚未登入者的信箱與角色，屬個資且是提權的關鍵資料，
-     * 因此對前端完全關閉，只有 Cloud Functions（Admin SDK）可讀寫。
-     */
-    match /accessGrants/{email} {
-      allow read, write: if false;
-    }
-
-    /* ------------------------------ 業務資料 ------------------------------ */
+    /* ------------------------------ 違規事件 ------------------------------ */
 
     match /infractions/{infractionId} {
       allow read: if isStaff();
-      allow write: if false;   // createInfraction / returnPaperCard / annotateCase
+
+      allow create: if isStaff()
+        && request.resource.data.studentId is string
+        && isSchoolDate(request.resource.data.occurredOn)
+        && request.resource.data.status == 'OPEN'
+        && request.resource.data.countsTowardRecidivism is bool
+        && (request.resource.data.consumedByAlertId == null
+            || request.resource.data.consumedByAlertId is string)
+        // 登錄者必須是本人，事後無法偽造是誰登錄的
+        && request.resource.data.recordedBy.uid == request.auth.uid
+        && serverTime('createdAt') && serverTime('updatedAt');
+
+      allow update: if isStaff()
+        && unchanged('studentId') && unchanged('occurredOn')
+        && unchanged('typeCode') && unchanged('createdAt') && unchanged('recordedBy')
+        && request.resource.data.status in ['OPEN', 'DONE', 'EXEMPTED', 'VOIDED']
+        && serverTime('updatedAt');
+
+      allow delete: if false;   // 誤報請用「撤銷」，保留軌跡
     }
+
+    /* ---------------------------- 下課管制每日帳 --------------------------- */
 
     match /recessRestrictions/{restrictionId} {
       allow read: if isStaff();
-      allow write: if false;
+      allow write: if isStaff()
+        && request.resource.data.studentId is string
+        && isSchoolDate(request.resource.data.date)
+        // 正向管教保障：飲水與如廁不受限，規則層級強制
+        && request.resource.data.allowWaterAndRestroom == true
+        && request.resource.data.status in ['ACTIVE', 'LIFTED', 'CANCELLED']
+        && serverTime('updatedAt');
+      allow delete: if false;
     }
+
+    /* ------------------------------ 再犯警示 ------------------------------ */
 
     match /recidivismAlerts/{alertId} {
       allow read: if isStaff();
-      allow write: if false;
+      allow create: if isStaff()
+        && request.resource.data.studentId is string
+        && request.resource.data.count is int
+        && request.resource.data.threshold is int
+        && serverTime('createdAt') && serverTime('updatedAt');
+      allow update: if isStaff()
+        && unchanged('studentId') && unchanged('count') && unchanged('threshold')
+        && unchanged('windowStart') && unchanged('windowEnd')
+        && request.resource.data.status in ['OPEN', 'ACKNOWLEDGED', 'ASSIGNED', 'CLOSED', 'DISMISSED']
+        && serverTime('updatedAt');
+      allow delete: if false;
     }
+
+    /* --------------------------- 安全觀察員派單 --------------------------- */
 
     match /observerAssignments/{assignmentId} {
       allow read: if isStaff();
-      allow write: if false;
+      allow create: if isStaff()
+        && request.resource.data.studentId is string
+        && isSchoolDate(request.resource.data.dutyOn)
+        && request.resource.data.totalPeriods is int
+        && serverTime('createdAt') && serverTime('updatedAt');
+      allow update: if isStaff()
+        && unchanged('studentId') && unchanged('alertId') && unchanged('createdAt')
+        && request.resource.data.status in
+             ['SCHEDULED', 'IN_PROGRESS', 'DUTY_COMPLETED', 'CLOSED', 'CANCELLED']
+        && serverTime('updatedAt');
+      allow delete: if false;
     }
 
-    /* ------------------------- 敏感集合（前端關閉） ------------------------ */
-
-    /** Trigger Email 擴充套件的寄信佇列 */
-    match /mail/{mailId} {
-      allow read, write: if false;
-    }
+    /* ------------------------------- 稽核 -------------------------------- */
 
     match /auditLogs/{logId} {
       allow read: if isAdmin();
-      allow write: if false;
+      // 僅可新增，且必須是本人、時間由伺服器決定；不可修改或刪除
+      allow create: if isStaff()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.action is string
+        && serverTime('createdAt');
+      allow update, delete: if false;
     }
 
     /* --------------------------- 預設全部拒絕 ---------------------------- */

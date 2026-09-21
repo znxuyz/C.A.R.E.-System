@@ -1,7 +1,12 @@
 /**
  * C.A.R.E. System — 領域模型型別定義
  *
- * 系統定位（v2）：
+ * 架構（v3・免費方案）：
+ *   不使用 Cloud Functions（需付費方案）。所有邏輯在前端執行，
+ *   以 Firestore 交易保證原子性，並由安全規則驗證每一筆寫入的形狀與權限。
+ *   角色存於 `staff/{uid}.roles`，規則以 get() 讀取判定。
+ *
+ * 系統定位：
  *   生活教育組長一人操作的「違規登錄 + 再犯追蹤」工具。
  *   反思卡與行為檢討書維持**紙本**作業，系統只紀錄「是否回收」以決定管制解除，
  *   核心價值在於自動計算「15 天內再犯次數」與後續的安全觀察員派單追蹤。
@@ -274,6 +279,38 @@ export interface ObserverAssignment {
  * 系統設定
  * ------------------------------------------------------------------ */
 
+/** 教職員帳號（角色的真實來源；安全規則以 get() 讀取此文件判定權限） */
+export interface StaffRecord {
+  uid: string;
+  email: string;
+  name: string;
+  roles: Role[];
+  active: boolean;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+}
+
+/**
+ * 以 Google 信箱預先授權的名單。
+ * 前端**不可讀取**（避免列舉校內信箱），但安全規則的 get() 仍可讀，
+ * 因此使用者首次登入時可據此建立自己的 staff 文件。
+ */
+export interface AccessGrant {
+  email: string;
+  name?: string | null;
+  roles: Role[];
+  active: boolean;
+  grantedBy?: { uid: string; name: string };
+  grantedAt: IsoTimestamp;
+  claimedByUid?: string;
+}
+
+/** 學生文件上的再犯視窗快取（交易計數用） */
+export interface RecidivismWindowEntry {
+  infractionId: string;
+  occurredOn: SchoolDate;
+}
+
 export interface SystemSettings {
   /** 再犯偵測回溯天數（含當天）— 預設 15 */
   recidivismWindowDays: number;
@@ -298,8 +335,6 @@ export interface SystemSettings {
      */
     showRoster: boolean;
   };
-  /** 是否寄 Email 通知導師（需 classes.homeroomEmail），預設關閉 */
-  emailHomeroom: boolean;
 }
 
 export const DEFAULT_SETTINGS: SystemSettings = {
@@ -310,7 +345,6 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   timezone: 'Asia/Taipei',
   carryOverUnfinished: true,
   publicBoard: { enabled: true, showRoster: false },
-  emailHomeroom: false,
 };
 
 /* ------------------------------------------------------------------ *

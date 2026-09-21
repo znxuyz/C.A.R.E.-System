@@ -10,8 +10,11 @@
 使用者：生活教育組長一人操作（其他老師看公開唯讀看板）
 登入：Google 帳號（管理者於畫面上授權，被授權者不需事先註冊）
 前端：GitHub Pages（React + Vite + TypeScript）
-後端：Firebase（Firestore + Cloud Functions + Auth）
+資料：Firebase Firestore + Auth —— 完全在免費方案（Spark）內，不需信用卡
 ```
+
+> 不使用 Cloud Functions（那需要付費方案）：業務邏輯在前端以 Firestore
+> **交易**執行，權限與資料形狀由**安全規則**把關（27 項自動化測試）。
 
 ![生教組儀表板](docs/images/dashboard.png)
 
@@ -56,7 +59,7 @@ npm ci
 npm run dev:web        # http://localhost:5173
 
 npm test               # 33 項單元測試（再犯演算法、日期視窗、案件規則）
-npm run test:rules     # 10 項 Firestore 安全規則測試（自動啟動模擬器，需 JDK 21）
+npm run test:rules     # 27 項 Firestore 安全規則測試（自動啟動模擬器，需 JDK 21）
 npm run typecheck
 npm run build
 ```
@@ -67,14 +70,15 @@ npm run build
 ## 專案結構
 
 ```
-functions/src/domain/     ★ 純領域層：再犯演算法、日期視窗、案件規則（可單元測試）
-functions/src/services/     違規登錄、再犯交易、觀察員值勤、下課管制帳、公開看板
-functions/src/handlers/     callable 端點、每日排程、角色與設定管理
+web/src/core/domain/      ★ 純領域層：再犯演算法、日期視窗、案件規則（可單元測試）
+web/src/core/services/      以 Firestore 交易實作：違規登錄、觀察員、管制帳、
+                            帳號授權、每日續帳、公開看板
 web/src/pages/              公開看板 + 生教組 7 頁
-firestore.rules             未登入者僅可讀公開看板；業務寫入一律經 callable
-firestore.indexes.json      8 組複合索引（含再犯視窗查詢）
-seed/                       系統參數、違規類型、地點、示範資料
-docs/                       架構、綱要、演算法、UI 規劃、部署文件
+web/test/                   單元測試 33 項 + 模擬器安全規則測試 27 項
+firestore.rules             唯一防線：權限判定 + 每筆寫入的形狀與時間戳驗證
+firestore.indexes.json      複合索引
+seed/                       管理者授權、系統參數、違規類型、地點、示範資料
+docs/                       架構、綱要、演算法、UI 規劃、設定手冊
 ```
 
 ## 關鍵設計決定
@@ -84,10 +88,12 @@ docs/                       架構、綱要、演算法、UI 規劃、部署文�
 3. **認列機制（`consumedByAlertId`）** — 觸發警示時把計入的違規標記給該次警示，
    第 4、5 次不會對同一波違規重複處分；演算法因此具幂等性，誤判撤銷時也會釋回額度。
 4. **再犯偵測在 Firestore 交易內執行** — 同一節下課連續登錄兩筆時不會產生兩張警示。
+   由於用戶端 SDK 的交易不能下查詢，計數改讀 `students/{id}.recidivismWindow` 快取。
 5. **公開看板只讀一份去識別化摘要** — 公開頁不接觸任何業務集合；預設只有統計數字，
    即使開啟名單也只有班級＋座號，永不顯示姓名或學號。
-6. **下課管制採「每日一筆」帳** — 對應紙本每日重開一頁；同日多重來源須全部解除才解鎖。
-7. **參數外置於 `settings/system`** — 15 天／3 次／5 節可調，且每張警示留存當時參數快照。
+6. **角色存於 Firestore 而非 token** — 取消授權下一次請求即生效，不必等 token 過期。
+7. **下課管制採「每日一筆」帳** — 對應紙本每日重開一頁；同日多重來源須全部解除才解鎖。
+8. **參數外置於 `settings/system`** — 15 天／3 次／5 節可調，且每張警示留存當時參數快照。
 
 ## 授權
 

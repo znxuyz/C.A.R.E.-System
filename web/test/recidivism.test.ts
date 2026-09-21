@@ -5,8 +5,8 @@ import {
   summarizeProgress,
   type CountableInfraction,
   type RecidivismConfig,
-} from '../src/domain/recidivism.js';
-import { INFRACTION_STATUS, type SchoolDate } from '../src/domain/types.js';
+} from '../src/core/domain/recidivism.js';
+import { INFRACTION_STATUS, type SchoolDate } from '../src/core/domain/types.js';
 
 const CONFIG: RecidivismConfig = { windowDays: 15, threshold: 3 };
 const ASOF: SchoolDate = '2026-09-18';

@@ -4,25 +4,25 @@
   "private": true,
   "description": "C.A.R.E. System — Conduct Assessment & Reflection Education System",
   "workspaces": [
-    "functions",
     "web"
   ],
   "scripts": {
-    "test": "npm run test --workspace functions",
-    "typecheck": "npm run typecheck --workspace functions && npm run typecheck --workspace web",
-    "build": "npm run build --workspace functions && npm run build --workspace web",
+    "test": "npm run test --workspace web",
+    "test:rules": "npm run test:rules --workspace web",
+    "typecheck": "npm run typecheck --workspace web",
+    "build": "npm run build --workspace web",
     "dev:web": "npm run dev --workspace web",
     "emulators": "firebase emulators:start --import=./firestore-emulator-data --export-on-exit",
     "seed": "node seed/seed.mjs",
-    "deploy:backend": "firebase deploy --only firestore:rules,firestore:indexes,functions",
     "seed:demo": "node seed/seed.mjs --demo",
-    "test:rules": "npm run test:rules --workspace functions"
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes"
   },
   "engines": {
     "node": ">=20"
   },
   "license": "MIT",
   "devDependencies": {
-    "firebase-tools": "^15.30.2"
+    "firebase-tools": "^15.30.2",
+    "firebase-admin": "^13.0.0"
   }
 }

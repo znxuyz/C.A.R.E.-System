@@ -1,6 +1,11 @@
 /**
  * 初始化 / 示範資料匯入
  *
+ * 另一個重要任務：建立**第一位管理者的授權**（accessGrants），
+ * 這是整個授權鏈的起點 —— 之後其餘帳號都由管理者在畫面上指派。
+ *   ADMIN_EMAILS="you@example.edu.tw" node seed/seed.mjs
+ * （也可以不跑這支指令，直接在 Firebase Console 手動建立一筆 accessGrants 文件）
+ *
  * 用法：
  *   # 匯入到本機模擬器
  *   FIRESTORE_EMULATOR_HOST=localhost:8080 GCLOUD_PROJECT=care-system-dev node seed/seed.mjs --demo
@@ -32,6 +37,38 @@ const taipeiDate = (offsetDays = 0) =>
   }).format(new Date(Date.now() + offsetDays * 86400000));
 const nowIso = () => new Date().toISOString();
 
+/** 第一位管理者：建立 accessGrants/{email}，登入後即自動取得角色 */
+async function seedAdmins() {
+  const emails = (process.env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (emails.length === 0) {
+    console.log('· 未設定 ADMIN_EMAILS，略過管理者授權（可稍後於 Console 手動建立）');
+    return;
+  }
+
+  const batch = db.batch();
+  for (const email of emails) {
+    batch.set(
+      db.doc(`accessGrants/${email}`),
+      {
+        email,
+        name: null,
+        roles: ['ADMIN', 'DISCIPLINE_STAFF'],
+        active: true,
+        grantedBy: { uid: 'seed', name: '初始匯入' },
+        grantedAt: new Date(),
+        updatedAt: new Date(),
+      },
+      { merge: true },
+    );
+  }
+  await batch.commit();
+  console.log(`✓ 管理者授權 × ${emails.length}：${emails.join('、')}`);
+}
+
 async function seedSettings() {
   await db.doc('settings/system').set({
     recidivismWindowDays: 15,
@@ -42,8 +79,7 @@ async function seedSettings() {
     carryOverUnfinished: true,
     // 公開看板預設只顯示統計數字；showRoster 開啟後也只有班級＋座號，絕不含姓名
     publicBoard: { enabled: true, showRoster: false },
-    emailHomeroom: false,
-    updatedAt: nowIso(),
+    updatedAt: new Date(),
   });
   console.log('✓ settings/system（15 天 / 3 次 / 5 節，公開看板僅統計）');
 }
@@ -117,7 +153,9 @@ async function seedDemo() {
 
   const batch = db.batch();
   for (const c of classes) batch.set(db.doc(`classes/${c.id}`), { ...c, updatedAt: nowIso() });
-  for (const s of students) batch.set(db.doc(`students/${s.id}`), { ...s, updatedAt: nowIso() });
+  for (const s of students) {
+    batch.set(db.doc(`students/${s.id}`), { ...s, recidivismWindow: [], updatedAt: new Date() });
+  }
   await batch.commit();
   console.log(`✓ 示範班級 ${classes.length}、學生 ${students.length}`);
 
@@ -129,6 +167,8 @@ async function seedDemo() {
     { studentId: 'stu_701_02', day: 0, type: 'RUN_IN_CORRIDOR', typeName: '走廊奔跑', paperCard: 'SAFETY', loc: 'CORRIDOR_2F', locName: '二樓走廊', period: 2, status: 'OPEN' },
     { studentId: 'stu_701_03', day: 0, type: 'FOUL_LANGUAGE', typeName: '口出穢言', paperCard: 'KIND_WORDS', loc: 'CAFETERIA', locName: '餐廳', period: 3, status: 'OPEN' },
   ];
+
+  const windowByStudent = new Map();
 
   for (const item of scenario) {
     const student = students.find((s) => s.id === item.studentId);
@@ -162,6 +202,11 @@ async function seedDemo() {
       updatedAt: iso,
     });
 
+    // 再犯視窗快取（交易計數用）：OPEN 與 DONE 皆計入
+    const entries = windowByStudent.get(student.id) ?? [];
+    entries.push({ infractionId: ref.id, occurredOn });
+    windowByStudent.set(student.id, entries);
+
     if (item.status === 'OPEN') {
       await db.doc(`recessRestrictions/${student.id}_${occurredOn}`).set({
         studentId: student.id,
@@ -182,16 +227,23 @@ async function seedDemo() {
       });
     }
   }
+  const windowBatch = db.batch();
+  for (const [studentId, entries] of windowByStudent) {
+    windowBatch.set(db.doc(`students/${studentId}`), { recidivismWindow: entries }, { merge: true });
+  }
+  await windowBatch.commit();
+
   console.log('✓ 示範情境：王小明 15 天內已 2 次、今日 2 件待回收紙本');
 }
 
 async function main() {
+  await seedAdmins();
   await seedSettings();
   await seedInfractionTypes();
   await seedLocations();
   await seedCalendar();
   if (withDemo) await seedDemo();
-  console.log('\n完成。');
+  console.log('\n完成。請用 ADMIN_EMAILS 指定的 Google 帳號登入系統。');
 }
 
 main().catch((error) => {

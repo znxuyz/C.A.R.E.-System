@@ -51,7 +51,6 @@ export function Settings() {
         recidivismThreshold: form.recidivismThreshold,
         observerPeriodNumbers: form.observerPeriodNumbers,
         carryOverUnfinished: form.carryOverUnfinished,
-        emailHomeroom: form.emailHomeroom,
         publicBoard: form.publicBoard,
       });
       setSaved(form);
@@ -177,22 +176,6 @@ export function Settings() {
             </span>
           </label>
         </div>
-      </Panel>
-
-      <Panel title="通知" hint="選用">
-        <label className={`check${form.emailHomeroom ? ' check--on' : ''}`}>
-          <input
-            type="checkbox"
-            checked={form.emailHomeroom}
-            onChange={(event) => patch({ emailHomeroom: event.target.checked })}
-          />
-          <span>
-            <span className="check__label">登錄違規時寄 Email 通知導師</span>
-            <span className="check__desc">
-              需先於班級資料填入導師信箱，並安裝 Firebase「Trigger Email」擴充套件。
-            </span>
-          </span>
-        </label>
       </Panel>
 
       <div className="row">

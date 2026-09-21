@@ -1,13 +1,27 @@
 /**
  * 資料存取層（單一入口）
  *
- *  - live：讀取走 Firestore（受安全規則保護），寫入一律走 Cloud Functions callable。
- *  - mock：純前端模擬（GitHub Pages 預覽、教育訓練、導入前動線確認）。
+ * 架構：**不使用 Cloud Functions**（需付費方案）。
+ *  - live 模式：直接以 Firestore 用戶端 SDK 讀寫，
+ *    業務邏輯在 `src/core/services/`，原子性靠 Firestore 交易，
+ *    權限與資料形狀由安全規則把關（見 firestore.rules）。
+ *  - mock 模式：純前端模擬，未設定 Firebase 金鑰時自動啟用。
  *
  * 公開看板只讀 `publicBoard/today` 一份去識別化文件，不需登入。
  */
-import { collection, doc, getDoc, getDocs, limit as fsLimit, orderBy, query, where } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit as fsLimit,
+  orderBy,
+  query,
+  where,
+  type DocumentData,
+  type Firestore,
+  type Timestamp,
+} from 'firebase/firestore';
 import {
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -19,6 +33,31 @@ import {
 import { USE_MOCK, firebase } from '../firebase/client.ts';
 import { MOCK_SESSION, mockApi } from './mock.ts';
 import { todayTaipei } from './format.ts';
+import { COL } from '../core/firestore/paths.ts';
+import { systemClock, type Ctx } from '../core/services/context.ts';
+import { claimAccess, grantAccess, listAccess, revokeAccess } from '../core/services/access.ts';
+import { loadCalendar } from '../core/services/calendar.ts';
+import { runDailySyncIfNeeded } from '../core/services/dailySync.ts';
+import {
+  annotateInfraction,
+  listPendingPapers,
+  logInfraction,
+  markPaperReturned,
+  readProgress,
+} from '../core/services/infractions.ts';
+import {
+  dismissAlert,
+  listAlerts,
+  listAssignments,
+  listOpenAssignments,
+  logPeriod,
+  markReviewReturned,
+  rescheduleDuty,
+} from '../core/services/observers.ts';
+import { rebuildPublicBoard } from '../core/services/publicBoard.ts';
+import { listRestrictionsOn } from '../core/services/restrictions.ts';
+import { loadSettings, updateSettings } from '../core/services/settings.ts';
+import { addDays } from '../core/domain/dates.ts';
 import type {
   AccessUser,
   AlertRow,
@@ -42,39 +81,39 @@ export { USE_MOCK };
 /* ------------------------------- 身分驗證 ------------------------------- */
 
 const MOCK_SESSION_KEY = 'care.session';
+let currentSession: Session | null = null;
 
-/** 已嘗試自動領取授權的 uid（避免重複呼叫） */
-const claimAttempted = new Set<string>();
+const db = (): Firestore => firebase()!.db;
 
-async function toSession(user: User, forceRefresh = false): Promise<Session> {
-  const token = await user.getIdTokenResult(forceRefresh);
+/** 服務層情境：帶入目前登入者，稽核軌跡才知道是誰操作 */
+function ctx(): Ctx {
+  if (!currentSession) throw new Error('尚未登入');
   return {
-    uid: user.uid,
-    name: user.displayName ?? user.email ?? user.uid,
-    email: user.email ?? undefined,
-    roles: ((token.claims.roles as Role[]) ?? []) as Role[],
+    db: db(),
+    actor: {
+      uid: currentSession.uid,
+      name: currentSession.name,
+      email: currentSession.email,
+    },
+    clock: systemClock,
   };
 }
 
-/**
- * 尚未取得角色時，自動向後端領取授權：
- *  - 信箱列於部署設定 ADMIN_EMAILS → 取得管理者權限
- *  - 管理者已在「帳號管理」預先授權該信箱 → 取得對應角色
- * 兩者皆無則維持無角色，前端顯示「尚未授權」畫面。
- */
-async function claimIfNeeded(user: User, session: Session): Promise<Session> {
-  if (session.roles.length > 0 || claimAttempted.has(user.uid)) return session;
-  claimAttempted.add(user.uid);
-  try {
-    const result = await call<Record<string, never>, { granted: boolean }>(
-      'claimAccess',
-      {} as Record<string, never>,
-    );
-    if (!result.granted) return session;
-    return await toSession(user, true); // 重新取得含新 claims 的 token
-  } catch {
-    return session;
-  }
+async function resolveSession(user: User): Promise<Session> {
+  const email = (user.email ?? '').toLowerCase();
+  const roles = await claimAccess(db(), {
+    uid: user.uid,
+    email,
+    name: user.displayName ?? email ?? user.uid,
+  });
+  const session: Session = {
+    uid: user.uid,
+    name: user.displayName ?? email ?? user.uid,
+    email: email || undefined,
+    roles: roles as Role[],
+  };
+  currentSession = session;
+  return session;
 }
 
 export const auth = {
@@ -82,6 +121,7 @@ export const auth = {
   async signInWithGoogle(): Promise<Session> {
     if (USE_MOCK) {
       sessionStorage.setItem(MOCK_SESSION_KEY, '1');
+      currentSession = MOCK_SESSION;
       return MOCK_SESSION;
     }
     const fb = firebase()!;
@@ -91,11 +131,9 @@ export const auth = {
 
     try {
       const credential = await signInWithPopup(fb.auth, provider);
-      const session = await toSession(credential.user, true);
-      return await claimIfNeeded(credential.user, session);
+      return await resolveSession(credential.user);
     } catch (error) {
       const code = (error as { code?: string }).code ?? '';
-      // 彈出視窗被瀏覽器阻擋時改用轉導登入（回來後由 subscribe 接手）
       if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
         await signInWithRedirect(fb.auth, provider);
         return new Promise<Session>(() => {});
@@ -108,6 +146,7 @@ export const auth = {
   },
 
   async signOut(): Promise<void> {
+    currentSession = null;
     if (USE_MOCK) {
       sessionStorage.removeItem(MOCK_SESSION_KEY);
       return;
@@ -117,57 +156,114 @@ export const auth = {
 
   subscribe(callback: (session: Session | null) => void): () => void {
     if (USE_MOCK) {
-      callback(sessionStorage.getItem(MOCK_SESSION_KEY) ? MOCK_SESSION : null);
+      const signed = Boolean(sessionStorage.getItem(MOCK_SESSION_KEY));
+      currentSession = signed ? MOCK_SESSION : null;
+      callback(currentSession);
       return () => {};
     }
-    const fb = firebase()!;
-    return onAuthStateChanged(fb.auth, async (user) => {
-      if (!user) return callback(null);
-      const session = await toSession(user);
-      callback(await claimIfNeeded(user, session));
+    return onAuthStateChanged(firebase()!.auth, async (user) => {
+      if (!user) {
+        currentSession = null;
+        return callback(null);
+      }
+      callback(await resolveSession(user));
     });
   },
 
   /** 手動重新檢查授權（「尚未授權」畫面的按鈕） */
   async recheckAccess(): Promise<Session | null> {
     if (USE_MOCK) return MOCK_SESSION;
-    const fb = firebase()!;
-    const user = fb.auth.currentUser;
-    if (!user) return null;
-    claimAttempted.delete(user.uid);
-    return claimIfNeeded(user, await toSession(user, true));
+    const user = firebase()!.auth.currentUser;
+    return user ? resolveSession(user) : null;
   },
 };
 
 /* --------------------------------- 工具 -------------------------------- */
 
-async function call<TIn extends object, TOut>(name: string, payload: TIn): Promise<TOut> {
-  const fb = firebase()!;
-  const fn = httpsCallable<TIn, TOut>(fb.functions, name);
-  const result = await fn(payload);
-  return result.data;
-}
+/** Firestore Timestamp 或 ISO 字串 → ISO 字串 */
+const toIso = (value: unknown): string | undefined => {
+  if (!value) return undefined;
+  if (typeof value === 'string') return value;
+  const ts = value as Timestamp;
+  return typeof ts?.toDate === 'function' ? ts.toDate().toISOString() : undefined;
+};
 
-const mapInfraction = (id: string, data: Record<string, unknown>): InfractionRow => ({
+const mapInfraction = (id: string, data: DocumentData): InfractionRow => ({
   id,
   studentId: data.studentId as string,
   studentNo: data.studentNo as string,
   studentName: data.studentName as string,
   className: (data.className as string) ?? '',
-  seatNo: data.seatNo as number | undefined,
+  seatNo: (data.seatNo as number | null) ?? undefined,
   typeCode: data.typeCode as string,
   typeName: (data.typeName as string) ?? '',
   paperCard: data.paperCard as InfractionRow['paperCard'],
-  occurredAt: data.occurredAt as string,
+  occurredAt: (toIso(data.occurredAt) ?? (data.occurredAt as string)) ?? '',
   occurredOn: data.occurredOn as string,
   periodNo: (data.periodNo as number) ?? 0,
   locationName: (data.locationName as string) ?? '',
-  note: data.note as string | undefined,
+  note: (data.note as string | null) ?? undefined,
   status: data.status as InfractionRow['status'],
-  paperReturnedOn: data.paperReturnedOn as string | undefined,
-  exemptReason: data.exemptReason as string | undefined,
-  voidReason: data.voidReason as string | undefined,
+  paperReturnedOn: (data.paperReturnedOn as string | null) ?? undefined,
+  exemptReason: (data.exemptReason as string | null) ?? undefined,
+  voidReason: (data.voidReason as string | null) ?? undefined,
   recordedBy: data.recordedBy as { uid: string; name: string } | undefined,
+});
+
+const mapAlert = (id: string, data: DocumentData): AlertRow => ({
+  id,
+  studentId: data.studentId as string,
+  studentNo: data.studentNo as string,
+  studentName: data.studentName as string,
+  className: (data.className as string) ?? '',
+  triggeredAt: toIso(data.triggeredAt) ?? '',
+  windowStart: data.windowStart as string,
+  windowEnd: data.windowEnd as string,
+  windowDays: (data.windowDays as number) ?? 15,
+  count: (data.count as number) ?? 0,
+  threshold: (data.threshold as number) ?? 3,
+  status: data.status as AlertRow['status'],
+  assignmentId: (data.assignmentId as string | null) ?? undefined,
+  dutyOn: (data.dutyOn as string | null) ?? undefined,
+  breakdown: ((data.breakdown as Array<DocumentData>) ?? []).map((item) => ({
+    infractionId: item.infractionId as string,
+    typeName: (item.typeName as string) ?? '',
+    occurredOn: item.occurredOn as string,
+  })),
+});
+
+const mapAssignment = (id: string, data: DocumentData): AssignmentRow => ({
+  id,
+  alertId: data.alertId as string,
+  studentId: data.studentId as string,
+  studentNo: data.studentNo as string,
+  studentName: data.studentName as string,
+  className: (data.className as string) ?? '',
+  dutyOn: data.dutyOn as string,
+  status: data.status as AssignmentRow['status'],
+  totalPeriods: (data.totalPeriods as number) ?? 5,
+  periodLogs: ((data.periodLogs as Array<DocumentData>) ?? []).map((log) => ({
+    periodNo: log.periodNo as number,
+    checkInAt: (log.checkInAt as string | null) ?? undefined,
+    checkOutAt: (log.checkOutAt as string | null) ?? undefined,
+    observedCount: (log.observedCount as number | null) ?? undefined,
+    note: (log.note as string | null) ?? undefined,
+  })),
+  reviewReturnedOn: (data.reviewReturnedOn as string | null) ?? undefined,
+  unlockOn: (data.unlockOn as string | null) ?? undefined,
+});
+
+const mapRestriction = (id: string, data: DocumentData): RestrictionRow => ({
+  id,
+  studentId: data.studentId as string,
+  studentNo: data.studentNo as string,
+  studentName: data.studentName as string,
+  className: (data.className as string) ?? '',
+  seatNo: (data.seatNo as number | null) ?? undefined,
+  date: data.date as string,
+  reasons: (data.reasons as RestrictionRow['reasons']) ?? [],
+  status: data.status as RestrictionRow['status'],
+  note: (data.note as string | null) ?? undefined,
 });
 
 /* ------------------------------ 資料存取 API ----------------------------- */
@@ -176,16 +272,24 @@ export const api = {
   /** 公開看板：不需登入，只讀一份去識別化摘要 */
   async publicBoard(): Promise<PublicBoardData> {
     if (USE_MOCK) return mockApi.publicBoard();
-    const fb = firebase()!;
-    const snap = await getDoc(doc(fb.db, 'publicBoard', 'today'));
+    const snap = await getDoc(doc(db(), COL.publicBoard, 'today'));
     if (!snap.exists()) throw new Error('公開看板尚未產生');
-    return snap.data() as PublicBoardData;
+    const data = snap.data();
+    return {
+      enabled: data.enabled !== false,
+      date: data.date as string,
+      updatedAt: toIso(data.updatedAt) ?? '',
+      stats: data.stats as PublicBoardData['stats'],
+      trend: (data.trend as PublicBoardData['trend']) ?? [],
+      hotspots: (data.hotspots as PublicBoardData['hotspots']) ?? [],
+      ...(data.roster ? { roster: data.roster as PublicBoardData['roster'] } : {}),
+      ...(data.observers ? { observers: data.observers as PublicBoardData['observers'] } : {}),
+    };
   },
 
   async infractionTypes(): Promise<InfractionTypeOption[]> {
     if (USE_MOCK) return mockApi.infractionTypes();
-    const fb = firebase()!;
-    const snap = await getDocs(query(collection(fb.db, 'infractionTypes'), orderBy('order')));
+    const snap = await getDocs(query(collection(db(), COL.infractionTypes), orderBy('order')));
     return snap.docs.map((d) => ({
       code: d.id,
       name: d.get('name') as string,
@@ -197,8 +301,7 @@ export const api = {
 
   async locations(): Promise<LocationOption[]> {
     if (USE_MOCK) return mockApi.locations();
-    const fb = firebase()!;
-    const snap = await getDocs(collection(fb.db, 'locations'));
+    const snap = await getDocs(collection(db(), COL.locations));
     return snap.docs.map((d) => ({
       code: d.id,
       name: d.get('name') as string,
@@ -208,37 +311,20 @@ export const api = {
 
   async dashboard(): Promise<DashboardData> {
     if (USE_MOCK) return mockApi.dashboard();
-    const fb = firebase()!;
-    const today = todayTaipei();
-    const since = todayTaipei(-13);
+    const settings = await loadSettings(db());
+    // 每天第一次開啟時續帳並重建公開看板（取代付費方案的排程函式）
+    await runDailySyncIfNeeded(ctx(), settings).catch(() => undefined);
 
-    const [restrictionSnap, pendingSnap, alertSnap, assignmentSnap, recentSnap] = await Promise.all([
-      getDocs(query(collection(fb.db, 'recessRestrictions'), where('date', '==', today))),
+    const today = todayTaipei();
+    const since = addDays(today, -13);
+    const [restrictionRows, pendingRows, alertRows, assignmentRows, recentSnap] = await Promise.all([
+      listRestrictionsOn(ctx(), today),
+      listPendingPapers(ctx()),
+      listAlerts(ctx(), 50),
+      listOpenAssignments(ctx()),
       getDocs(
         query(
-          collection(fb.db, 'infractions'),
-          where('status', '==', 'OPEN'),
-          orderBy('occurredOn', 'desc'),
-          fsLimit(100),
-        ),
-      ),
-      getDocs(
-        query(
-          collection(fb.db, 'recidivismAlerts'),
-          where('status', 'in', ['OPEN', 'ACKNOWLEDGED', 'ASSIGNED']),
-          fsLimit(50),
-        ),
-      ),
-      getDocs(
-        query(
-          collection(fb.db, 'observerAssignments'),
-          where('status', 'in', ['SCHEDULED', 'IN_PROGRESS', 'DUTY_COMPLETED']),
-          fsLimit(50),
-        ),
-      ),
-      getDocs(
-        query(
-          collection(fb.db, 'infractions'),
+          collection(db(), COL.infractions),
           where('occurredOn', '>=', since),
           where('occurredOn', '<=', today),
           fsLimit(500),
@@ -246,16 +332,18 @@ export const api = {
       ),
     ]);
 
-    const restrictions = restrictionSnap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as Omit<RestrictionRow, 'id'>),
-    }));
-    const pendingPapers = pendingSnap.docs.map((d) => mapInfraction(d.id, d.data()));
-    const alerts = alertSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AlertRow, 'id'>) }));
-    const assignments = assignmentSnap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as Omit<AssignmentRow, 'id'>),
-    }));
+    const restrictions = restrictionRows.map((row) =>
+      mapRestriction(row.id as string, row as DocumentData),
+    );
+    const pendingPapers = pendingRows.map((row) =>
+      mapInfraction(row.id as string, row as DocumentData),
+    );
+    const alerts = alertRows
+      .map((row) => mapAlert(row.id as string, row as DocumentData))
+      .filter((alert) => alert.status === 'OPEN' || alert.status === 'ASSIGNED' || alert.status === 'ACKNOWLEDGED');
+    const assignments = assignmentRows.map((row) =>
+      mapAssignment(row.id as string, row as DocumentData),
+    );
 
     const counted = recentSnap.docs.filter(
       (d) => d.get('status') !== 'VOIDED' && d.get('status') !== 'EXEMPTED',
@@ -275,7 +363,7 @@ export const api = {
       hotspotMap.set(name, (hotspotMap.get(name) ?? 0) + 1);
     }
 
-    // 關注名單：視窗內有紀錄但尚未達門檻（未被認列）
+    // 關注名單：視窗內尚未被認列、且未達門檻者
     const byStudent = new Map<string, WatchlistRow>();
     for (const d of counted) {
       if (d.get('consumedByAlertId')) continue;
@@ -284,12 +372,12 @@ export const api = {
         studentId,
         studentNo: d.get('studentNo') as string,
         studentName: d.get('studentName') as string,
-        className: d.get('className') as string,
+        className: (d.get('className') as string) ?? '',
         count: 0,
-        shortfall: 3,
+        shortfall: settings.recidivismThreshold,
       };
       row.count += 1;
-      row.shortfall = Math.max(0, 3 - row.count);
+      row.shortfall = Math.max(0, settings.recidivismThreshold - row.count);
       byStudent.set(studentId, row);
     }
     const watchlist = [...byStudent.values()]
@@ -321,80 +409,69 @@ export const api = {
 
   async pendingPapers(): Promise<InfractionRow[]> {
     if (USE_MOCK) return mockApi.pendingPapers();
-    const fb = firebase()!;
-    const snap = await getDocs(
-      query(
-        collection(fb.db, 'infractions'),
-        where('status', '==', 'OPEN'),
-        orderBy('occurredOn', 'desc'),
-        fsLimit(100),
-      ),
-    );
-    return snap.docs.map((d) => mapInfraction(d.id, d.data()));
+    const rows = await listPendingPapers(ctx());
+    return rows.map((row) => mapInfraction(row.id as string, row as DocumentData));
   },
 
   async alerts(): Promise<AlertRow[]> {
     if (USE_MOCK) return mockApi.alerts();
-    const fb = firebase()!;
-    const snap = await getDocs(
-      query(collection(fb.db, 'recidivismAlerts'), orderBy('triggeredAt', 'desc'), fsLimit(100)),
-    );
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AlertRow, 'id'>) }));
+    const rows = await listAlerts(ctx());
+    return rows.map((row) => mapAlert(row.id as string, row as DocumentData));
   },
 
   async assignments(): Promise<AssignmentRow[]> {
     if (USE_MOCK) return mockApi.assignments();
-    const fb = firebase()!;
-    const snap = await getDocs(
-      query(collection(fb.db, 'observerAssignments'), orderBy('dutyOn', 'asc'), fsLimit(100)),
-    );
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AssignmentRow, 'id'>) }));
+    const rows = await listAssignments(ctx());
+    return rows.map((row) => mapAssignment(row.id as string, row as DocumentData));
   },
 
   async restrictions(date: string): Promise<RestrictionRow[]> {
     if (USE_MOCK) return mockApi.restrictions(date);
-    const fb = firebase()!;
-    const snap = await getDocs(
-      query(collection(fb.db, 'recessRestrictions'), where('date', '==', date)),
-    );
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<RestrictionRow, 'id'>) }));
+    const rows = await listRestrictionsOn(ctx(), date);
+    return rows.map((row) => mapRestriction(row.id as string, row as DocumentData));
   },
 
   async searchStudent(keyword: string) {
     if (USE_MOCK) return mockApi.searchStudent(keyword);
-    const fb = firebase()!;
+    const trimmed = keyword.trim();
     const snap = await getDocs(
-      query(collection(fb.db, 'students'), where('studentNo', '==', keyword.trim()), fsLimit(5)),
+      query(collection(db(), COL.students), where('studentNo', '==', trimmed), fsLimit(5)),
     );
+    const settings = await loadSettings(db());
+    const windowStart = addDays(todayTaipei(), -(settings.recidivismWindowDays - 1));
     return snap.docs.map((d) => ({
       id: d.id,
       studentNo: d.get('studentNo') as string,
       name: d.get('name') as string,
       className: d.get('className') as string,
       seatNo: d.get('seatNo') as number | undefined,
-      windowCount: undefined as number | undefined,
+      windowCount: (
+        ((d.get('recidivismWindow') as Array<{ occurredOn: string }>) ?? []).filter(
+          (entry) => entry.occurredOn >= windowStart,
+        )
+      ).length,
     }));
   },
 
   async student(studentId: string): Promise<StudentDetail> {
     if (USE_MOCK) return mockApi.student(studentId);
-    const fb = firebase()!;
+    const settings = await loadSettings(db());
     const today = todayTaipei();
-    const [studentSnap, historySnap, alertSnap, assignmentSnap, progress, restrictionSnap] =
+    const [studentSnap, historySnap, alertSnap, assignmentSnap, restrictionSnap, progress] =
       await Promise.all([
-        getDoc(doc(fb.db, 'students', studentId)),
+        getDoc(doc(db(), COL.students, studentId)),
         getDocs(
           query(
-            collection(fb.db, 'infractions'),
+            collection(db(), COL.infractions),
             where('studentId', '==', studentId),
             orderBy('occurredOn', 'desc'),
             fsLimit(50),
           ),
         ),
-        getDocs(query(collection(fb.db, 'recidivismAlerts'), where('studentId', '==', studentId), fsLimit(20))),
-        getDocs(query(collection(fb.db, 'observerAssignments'), where('studentId', '==', studentId), fsLimit(20))),
-        call<{ studentId: string }, StudentDetail['progress']>('studentProgress', { studentId }),
-        getDoc(doc(fb.db, 'recessRestrictions', `${studentId}_${today}`)),
+        getDocs(query(collection(db(), COL.recidivismAlerts), where('studentId', '==', studentId), fsLimit(20))),
+        getDocs(query(collection(db(), COL.observerAssignments), where('studentId', '==', studentId), fsLimit(20))),
+        getDoc(doc(db(), COL.recessRestrictions, `${studentId}_${today}`)),
+        readProgress(ctx(), studentId, settings),
       ]);
     if (!studentSnap.exists()) throw new Error('查無此學生');
 
@@ -411,7 +488,7 @@ export const api = {
         duties: assignmentSnap.size,
       },
       history: historySnap.docs.map((d) => mapInfraction(d.id, d.data())),
-      alerts: alertSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AlertRow, 'id'>) })),
+      alerts: alertSnap.docs.map((d) => mapAlert(d.id, d.data())),
       restrictedToday: restrictionSnap.exists() && restrictionSnap.get('status') === 'ACTIVE',
     };
   },
@@ -420,81 +497,110 @@ export const api = {
 
   async settings(): Promise<SystemSettings> {
     if (USE_MOCK) return mockApi.settings();
-    const fb = firebase()!;
-    const snap = await getDoc(doc(fb.db, 'settings', 'system'));
-    const data = (snap.data() ?? {}) as Partial<SystemSettings>;
-    return {
-      recidivismWindowDays: data.recidivismWindowDays ?? 15,
-      recidivismThreshold: data.recidivismThreshold ?? 3,
-      observerPeriods: data.observerPeriods ?? 5,
-      observerPeriodNumbers: data.observerPeriodNumbers ?? [1, 2, 3, 4, 5],
-      carryOverUnfinished: data.carryOverUnfinished ?? true,
-      publicBoard: {
-        enabled: data.publicBoard?.enabled ?? true,
-        showRoster: data.publicBoard?.showRoster ?? false,
-      },
-      emailHomeroom: data.emailHomeroom ?? false,
-    };
+    return loadSettings(db());
   },
 
   async updateSettings(patch: Partial<SystemSettings>) {
     if (USE_MOCK) return mockApi.updateSettings(patch);
-    return call<Partial<SystemSettings>, { ok: boolean; settings: SystemSettings }>(
-      'updateSettings',
-      patch,
-    );
+    const settings = await updateSettings(ctx(), patch);
+    await rebuildPublicBoard(ctx(), settings).catch(() => undefined);
+    return { ok: true, settings };
   },
 
   async listAccess(): Promise<{ users: AccessUser[]; bootstrapAdmins: string[] }> {
     if (USE_MOCK) return mockApi.listAccess();
-    return call<Record<string, never>, { users: AccessUser[]; bootstrapAdmins: string[] }>(
-      'listAccess',
-      {} as Record<string, never>,
-    );
+    const users = (await listAccess(db())) as AccessUser[];
+    return { users, bootstrapAdmins: [] };
   },
 
   async grantAccess(email: string, roles: Role[], name?: string) {
     if (USE_MOCK) return mockApi.grantAccess(email, roles, name);
-    return call<{ email: string; roles: Role[]; name?: string }, {
-      ok: boolean;
-      email: string;
-      roles: Role[];
-      appliedImmediately: boolean;
-    }>('grantAccess', { email, roles, name });
+    const result = await grantAccess(ctx(), { email, roles, name });
+    return { ok: true, ...result, appliedImmediately: true };
   },
 
   async revokeAccess(email: string) {
     if (USE_MOCK) return mockApi.revokeAccess(email);
-    return call<{ email: string }, { ok: boolean }>('revokeAccess', { email });
+    await revokeAccess(ctx(), email);
+    return { ok: true };
   },
 
-  /* --- 寫入（live 一律經 Cloud Functions） --- */
+  /* --- 寫入（live 模式直接以交易寫入 Firestore） --- */
 
   async createInfraction(input: CreateInfractionInput) {
     if (USE_MOCK) return mockApi.createInfraction(input);
-    return call<CreateInfractionInput, {
-      infractionId: string;
-      studentId: string;
-      studentName: string;
-      className: string;
-      paperCardLabel: string;
-      recidivism: { triggered: boolean; count: number; shortfall: number; dutyOn?: string };
-    }>('createInfraction', input);
+
+    const settings = await loadSettings(db());
+    const [studentSnap, typeSnap, locationSnap] = await Promise.all([
+      getDocs(
+        query(
+          collection(db(), COL.students),
+          where('studentNo', '==', input.studentNo.trim()),
+          fsLimit(1),
+        ),
+      ),
+      getDoc(doc(db(), COL.infractionTypes, input.typeCode)),
+      getDoc(doc(db(), COL.locations, input.locationCode)),
+    ]);
+    const studentDoc = studentSnap.docs[0];
+    if (!studentDoc) throw new Error(`查無學號 ${input.studentNo} 的學生`);
+    if (!typeSnap.exists()) throw new Error('查無此違規類型');
+
+    const today = todayTaipei();
+    const calendar = await loadCalendar(db(), today, addDays(today, 45));
+    const result = await logInfraction(
+      ctx(),
+      {
+        student: {
+          id: studentDoc.id,
+          studentNo: studentDoc.get('studentNo') as string,
+          name: studentDoc.get('name') as string,
+          classId: studentDoc.get('classId') as string,
+          className: studentDoc.get('className') as string,
+          seatNo: (studentDoc.get('seatNo') as number | null) ?? null,
+        },
+        type: {
+          code: typeSnap.id,
+          name: typeSnap.get('name') as string,
+          paperCard: typeSnap.get('paperCard') as 'SAFETY' | 'KIND_WORDS',
+          countsTowardRecidivism: typeSnap.get('countsTowardRecidivism') !== false,
+        },
+        location: {
+          code: input.locationCode,
+          name: (locationSnap.get('name') as string) ?? input.locationCode,
+        },
+        periodNo: input.periodNo,
+        occurredOn: today,
+        occurredAt: new Date().toISOString(),
+        note: input.note,
+      },
+      settings,
+      calendar,
+    );
+    await rebuildPublicBoard(ctx(), settings).catch(() => undefined);
+
+    return {
+      infractionId: result.infractionId,
+      studentId: studentDoc.id,
+      studentName: studentDoc.get('name') as string,
+      className: studentDoc.get('className') as string,
+      paperCardLabel: result.paperCardLabel,
+      recidivism: result.recidivism,
+    };
   },
 
   async returnPaperCard(infractionId: string) {
     if (USE_MOCK) return mockApi.returnPaperCard(infractionId);
-    return call<{ infractionId: string }, { status: string; unlockOn: string }>('returnPaperCard', {
-      infractionId,
-    });
+    const result = await markPaperReturned(ctx(), infractionId);
+    await refreshBoard();
+    return { status: 'DONE', unlockOn: result.unlockOn };
   },
 
   async annotate(infractionId: string, action: 'EXEMPT' | 'VOID', reason: string) {
     if (USE_MOCK) return mockApi.annotate(infractionId, action, reason);
-    return call<{ infractionId: string; action: string; reason: string }, { ok: boolean }>(
-      'annotateCase',
-      { infractionId, action, reason },
-    );
+    await annotateInfraction(ctx(), { infractionId, action, reason });
+    await refreshBoard();
+    return { ok: true };
   },
 
   async logObserverPeriod(input: {
@@ -505,32 +611,44 @@ export const api = {
     note?: string;
   }) {
     if (USE_MOCK) return mockApi.logObserverPeriod(input);
-    return call<typeof input, { status: string; completedPeriods: number }>(
-      'logObserverPeriod',
-      input,
-    );
+    const result = await logPeriod(ctx(), input);
+    await refreshBoard();
+    return result;
   },
 
   async returnConductReview(assignmentId: string) {
     if (USE_MOCK) return mockApi.returnConductReview(assignmentId);
-    return call<{ assignmentId: string }, { unlockOn: string }>('returnConductReview', {
-      assignmentId,
-    });
+    const today = todayTaipei();
+    const calendar = await loadCalendar(db(), today, addDays(today, 45));
+    const result = await markReviewReturned(ctx(), assignmentId, calendar);
+    await refreshBoard();
+    return result;
   },
 
   async rescheduleDuty(assignmentId: string, dutyOn: string, reason = '生教組調整') {
     if (USE_MOCK) return mockApi.rescheduleDuty(assignmentId, dutyOn);
-    return call<{ assignmentId: string; dutyOn: string; reason: string }, { ok: boolean }>(
-      'rescheduleObserverDuty',
-      { assignmentId, dutyOn, reason },
-    );
+    const settings = await loadSettings(db());
+    const calendar = await loadCalendar(db(), dutyOn, addDays(dutyOn, 1));
+    await rescheduleDuty(ctx(), { assignmentId, dutyOn, reason }, settings, calendar);
+    await refreshBoard();
+    return { ok: true };
   },
 
   async dismissAlert(alertId: string, reason: string) {
     if (USE_MOCK) return mockApi.dismissAlert(alertId, reason);
-    return call<{ alertId: string; reason: string }, { ok: boolean }>('dismissRecidivismAlert', {
-      alertId,
-      reason,
-    });
+    const settings = await loadSettings(db());
+    await dismissAlert(ctx(), { alertId, reason }, settings);
+    await refreshBoard();
+    return { ok: true };
   },
 };
+
+/** 每次異動後重建公開看板（失敗不影響主要操作） */
+async function refreshBoard(): Promise<void> {
+  try {
+    const settings = await loadSettings(db());
+    await rebuildPublicBoard(ctx(), settings);
+  } catch {
+    /* 看板為次要資訊，下次開啟儀表板時會重建 */
+  }
+}

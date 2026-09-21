@@ -63,10 +63,10 @@ if triggered:
 
 | 層 | 檔案 | 職責 |
 |---|---|---|
-| 純邏輯 | [`functions/src/domain/recidivism.ts`](../functions/src/domain/recidivism.ts) | `evaluateRecidivism()`、`buildAlert()`、`summarizeProgress()`；無 I/O |
-| 視窗運算 | [`functions/src/domain/dates.ts`](../functions/src/domain/dates.ts) | `recidivismWindow()`、`nextSchoolDay()`（Asia/Taipei） |
-| 查詢 | [`functions/src/data/repositories.ts`](../functions/src/data/repositories.ts) | `readRecidivismWindow()`（交易內讀取） |
-| 交易與派單 | [`functions/src/services/recidivismService.ts`](../functions/src/services/recidivismService.ts) | `evaluateAndTrigger()`、`peekProgress()` |
+| 純邏輯 | [`web/src/core/domain/recidivism.ts`](../web/src/core/domain/recidivism.ts) | `evaluateRecidivism()`、`buildAlert()`、`summarizeProgress()`；無 I/O |
+| 視窗運算 | [`web/src/core/domain/dates.ts`](../web/src/core/domain/dates.ts) | `recidivismWindow()`、`nextSchoolDay()`（Asia/Taipei） |
+| 交易與派單 | [`web/src/core/services/infractions.ts`](../web/src/core/services/infractions.ts) | `logInfraction()`（交易內完成計數、觸發、認列、派單） |
+| 進度查詢 | 同上 | `readProgress()`（只讀一份學生文件） |
 | SQL 等價版 | [`sql/recidivism.sql`](sql/recidivism.sql) | `evaluate_recidivism()`、`trigger_recidivism_if_needed()` |
 
 ### 3.1 核心純函式（TypeScript）
@@ -101,31 +101,55 @@ export function isCountable(item, windowStart, windowEnd): boolean {
 }
 ```
 
-### 3.2 Firestore 查詢
+### 3.2 為什麼用「學生文件上的視窗快取」而不是查詢
+
+本系統不使用 Cloud Functions（需付費方案），寫入來自前端。
+而 **Firestore 用戶端 SDK 的交易只能依文件參照讀取，不能在交易內下查詢**
+（Admin SDK 可以，用戶端不行）。若先查詢、再開交易，兩者之間就有空窗，
+連續登錄兩筆時可能各自判定「差一次」而重複觸發。
+
+因此把該生視窗內、尚未認列的違規摘要存在學生文件上：
+
+```jsonc
+// students/{studentId}
+{
+  "studentNo": "1140101", "name": "王小明", …,
+  "recidivismWindow": [                       // ★ 交易計數用的投影
+    { "infractionId": "inf_a", "occurredOn": "2026-09-10" },
+    { "infractionId": "inf_b", "occurredOn": "2026-09-15" }
+  ]
+}
+```
+
+交易流程（`logInfraction`）：
 
 ```ts
-const query = firestore.collection('infractions')
-  .where('studentId', '==', studentId)
-  .where('countsTowardRecidivism', '==', true)
-  .where('consumedByAlertId', '==', null)
-  .where('status', 'in', ['OPEN', 'DONE'])
-  .where('occurredOn', '>=', windowStart)
-  .where('occurredOn', '<=', windowEnd)
-  .orderBy('occurredOn', 'asc')
-  .limit(50);
+await runTransaction(db, async (tx) => {
+  const studentSnap = await tx.get(studentRef);              // 僅文件讀取
+  const cached = prune(studentSnap.get('recidivismWindow'), windowStart);
+  const counted = [...cached, { infractionId, occurredOn }];
+  const triggered = counted.length >= settings.recidivismThreshold;
 
-const snap = await tx.get(query);   // ★ 必須在 Transaction 內讀取
+  tx.set(infractionRef, { …, consumedByAlertId: triggered ? alertRef.id : null });
+  if (triggered) {
+    tx.set(alertRef, alert);                                  // 警示
+    for (const item of cached) tx.update(infractionDoc(item.infractionId), { consumedByAlertId: alertRef.id });
+    tx.set(assignmentRef, assignment);                        // 安全觀察員派單
+    tx.set(studentRef, { recidivismWindow: [] }, { merge: true });   // 認列後歸零
+  } else {
+    tx.set(studentRef, { recidivismWindow: counted }, { merge: true });
+  }
+});
 ```
 
-需要的複合索引（欄位順序：等值在前、範圍在後）：
+要點：
 
-```
-infractions: studentId ASC, countsTowardRecidivism ASC,
-             consumedByAlertId ASC, status ASC, occurredOn ASC
-```
-
-> 注意：`consumedByAlertId` 未認列時必須**明確寫入 `null`**。
-> Firestore 不索引缺漏欄位，欄位不存在的文件不會出現在查詢結果中。
+* `infractions` 仍是完整的事件帳本；快取只是計數投影，兩者在同一交易內一起更新。
+* 免記／撤銷會把該筆從快取移除（`annotateInfraction`）；
+  撤銷警示則把認列的違規放回快取（`dismissAlert`），不會永久吃掉額度。
+* 進度查詢因此只需讀一份學生文件，比集合查詢便宜 —— 對免費額度友善。
+* 安全規則限制生教組長對 `students` **只能更新 `recidivismWindow` 欄位**，
+  姓名、班級等主檔仍需管理者權限。
 
 ### 3.3 等價 SQL（PostgreSQL / BigQuery）
 
@@ -166,9 +190,10 @@ SELECT student_id, id, occurred_on,
 
 **做法**：
 
-1. Firestore：整段包在 `runTransaction()` 內；交易讀到的文件若在提交前被變更，
-   交易會自動重試，不會有兩個交易同時看到「差一次就達標」而各自觸發。
-2. 認列欄位：觸發時把計入的違規標記 `consumedByAlertId`，演算法因此具幂等性。
+1. Firestore 交易：計數與觸發都在 `runTransaction()` 內，且只讀學生文件。
+   該文件若在提交前被其他寫入變更，交易會自動重試，不會有兩筆同時觸發。
+2. 認列欄位：觸發時把計入的違規標記 `consumedByAlertId` 並清空快取，
+   演算法因此具幂等性（第 4、5 次不會再觸發）。
 3. SQL 版本：以 `SELECT … FOR UPDATE` 鎖住視窗內候選列，達到同樣效果。
 
 **撤銷誤判**：`dismissAlert()` 會把該警示認列的違規 `consumedByAlertId` 還原為 `null`，
@@ -176,7 +201,7 @@ SELECT student_id, id, occurred_on,
 
 ## 5. 觸發時機
 
-`evaluateAndTrigger()` 在**違規登錄當下**執行一次（`infractionService.logInfraction`）。
+計數與判定在**違規登錄當下**於交易內完成（`core/services/infractions.ts` 的 `logInfraction`）。
 免記／撤銷只會讓該筆不再計入，不需重新觸發判定 —— 因為門檻是「達到就觸發」，
 少一筆不會讓已發生的警示失效（需要撤銷時由生教組長於警示板操作）。
 
@@ -184,13 +209,15 @@ SELECT student_id, id, occurred_on,
 
 - 時間：查詢受 `limit(50)` 約束，實務上一位學生 15 天內不會超過個位數；
   判定為 O(n log n)（排序），n ≤ 50。
-- Firestore 讀取：每次登錄 1 次視窗查詢（讀取數 = 命中文件數，通常 ≤ 3）。
-- 觸發時寫入：1（警示）+ n（認列）+ 1（派單）+ 1（管制帳）≈ 6 次。
+- Firestore 讀取：每次登錄只讀 3 份文件（學生 + 兩筆管制帳），與違規筆數無關。
+- 觸發時寫入：1（違規）+ 1（警示）+ n（認列）+ 1（派單）+ 2（管制帳）+ 1（稽核）≈ 7 次。
+- 進度查詢：1 次文件讀取。
 
 ## 7. 測試覆蓋
 
-`functions/test/recidivism.test.ts`（14 項）＋ `dates.test.ts`（9 項）＋
+`web/test/recidivism.test.ts`（14 項）＋ `dates.test.ts`（9 項）＋
 `caseRules.test.ts`（10 項）＝ **33 項，全數通過**；
+`web/test/emulator/rules.test.ts` 另有 **27 項安全規則測試**（Firestore 模擬器），
 `docs/sql/recidivism_test.sql` 另有 **10 項 SQL 斷言**（PostgreSQL 16 驗證）。
 
 | 案例 | 期望 |
