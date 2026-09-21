@@ -35,7 +35,7 @@ export async function updateSettings(
   const next: SystemSettings = { ...before };
 
   if (patch.recidivismWindowDays !== undefined) {
-    next.recidivismWindowDays = intInRange(patch.recidivismWindowDays, 1, 90, '回溯天數');
+    next.recidivismWindowDays = intInRange(patch.recidivismWindowDays, 1, 365, '回溯天數');
   }
   if (patch.recidivismThreshold !== undefined) {
     next.recidivismThreshold = intInRange(patch.recidivismThreshold, 1, 20, '觸發次數');

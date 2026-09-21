@@ -322,6 +322,13 @@ describe('系統管理者', () => {
         updatedAt: serverTimestamp(),
       }),
     );
+    // 一學年（365 天）在容許範圍內
+    await assertSucceeds(
+      setDoc(doc(db, 'settings', 'system'), {
+        recidivismWindowDays: 365, recidivismThreshold: 3, observerPeriods: 5,
+        updatedAt: serverTimestamp(),
+      }),
+    );
     await assertFails(
       setDoc(doc(db, 'settings', 'system'), {
         recidivismWindowDays: 999, recidivismThreshold: 3, observerPeriods: 5,

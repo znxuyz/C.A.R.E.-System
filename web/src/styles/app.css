@@ -186,6 +186,9 @@ table.data tbody tr:last-child td { border-bottom: none; }
 .btn--ghost { background: transparent; border-color: transparent; color: var(--brand-500); }
 .btn--lg { padding: 12px 20px; font-size: 15px; }
 .btn--block { width: 100%; }
+.btn--sm { padding: 4px 10px; font-size: 13px; }
+.btn--on { background: var(--brand-500); border-color: var(--brand-500); color: var(--brand-ink-on); }
+.btn--on:hover { background: var(--brand-600); }
 .btn-row { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 
 /* --------------------------------- 表單 -------------------------------- */

@@ -170,7 +170,7 @@ service cloud.firestore {
       allow write: if isAdmin()
         && request.resource.data.recidivismWindowDays is int
         && request.resource.data.recidivismWindowDays >= 1
-        && request.resource.data.recidivismWindowDays <= 90
+        && request.resource.data.recidivismWindowDays <= 365
         && request.resource.data.recidivismThreshold is int
         && request.resource.data.recidivismThreshold >= 1
         && request.resource.data.recidivismThreshold <= 20

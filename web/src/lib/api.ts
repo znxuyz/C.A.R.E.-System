@@ -21,7 +21,7 @@ import {
   type DocumentData,
   type Firestore,
   type Timestamp,
-} from 'firebase/firestore';
+} from "firebase/firestore";
 import {
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -29,22 +29,27 @@ import {
   signInWithRedirect,
   signOut as fbSignOut,
   type User,
-} from 'firebase/auth';
-import { USE_MOCK, firebase } from '../firebase/client.ts';
-import { MOCK_SESSION, mockApi } from './mock.ts';
-import { todayTaipei } from './format.ts';
-import { COL } from '../core/firestore/paths.ts';
-import { systemClock, type Ctx } from '../core/services/context.ts';
-import { claimAccess, grantAccess, listAccess, revokeAccess } from '../core/services/access.ts';
-import { loadCalendar } from '../core/services/calendar.ts';
-import { runDailySyncIfNeeded } from '../core/services/dailySync.ts';
+} from "firebase/auth";
+import { USE_MOCK, firebase } from "../firebase/client.ts";
+import { MOCK_SESSION, mockApi } from "./mock.ts";
+import { todayTaipei } from "./format.ts";
+import { COL } from "../core/firestore/paths.ts";
+import { systemClock, type Ctx } from "../core/services/context.ts";
+import {
+  claimAccess,
+  grantAccess,
+  listAccess,
+  revokeAccess,
+} from "../core/services/access.ts";
+import { loadCalendar } from "../core/services/calendar.ts";
+import { runDailySyncIfNeeded } from "../core/services/dailySync.ts";
 import {
   annotateInfraction,
   listPendingPapers,
   logInfraction,
   markPaperReturned,
   readProgress,
-} from '../core/services/infractions.ts';
+} from "../core/services/infractions.ts";
 import {
   dismissAlert,
   listAlerts,
@@ -53,11 +58,20 @@ import {
   logPeriod,
   markReviewReturned,
   rescheduleDuty,
-} from '../core/services/observers.ts';
-import { rebuildPublicBoard } from '../core/services/publicBoard.ts';
-import { listRestrictionsOn } from '../core/services/restrictions.ts';
-import { loadSettings, updateSettings } from '../core/services/settings.ts';
-import { addDays } from '../core/domain/dates.ts';
+} from "../core/services/observers.ts";
+import { rebuildPublicBoard } from "../core/services/publicBoard.ts";
+import { listRestrictionsOn } from "../core/services/restrictions.ts";
+import { loadSettings, updateSettings } from "../core/services/settings.ts";
+import { addDays } from "../core/domain/dates.ts";
+import {
+  DEFAULT_INFRACTION_TYPES,
+  DEFAULT_LOCATIONS,
+} from "../core/domain/defaults.ts";
+import {
+  importStudents,
+  parseRoster,
+  seedBaseData,
+} from "../core/services/roster.ts";
 import type {
   AccessUser,
   AlertRow,
@@ -74,20 +88,20 @@ import type {
   StudentDetail,
   SystemSettings,
   WatchlistRow,
-} from './types.ts';
+} from "./types.ts";
 
 export { USE_MOCK };
 
 /* ------------------------------- 身分驗證 ------------------------------- */
 
-const MOCK_SESSION_KEY = 'care.session';
+const MOCK_SESSION_KEY = "care.session";
 let currentSession: Session | null = null;
 
 const db = (): Firestore => firebase()!.db;
 
 /** 服務層情境：帶入目前登入者，稽核軌跡才知道是誰操作 */
 function ctx(): Ctx {
-  if (!currentSession) throw new Error('尚未登入');
+  if (!currentSession) throw new Error("尚未登入");
   return {
     db: db(),
     actor: {
@@ -100,7 +114,7 @@ function ctx(): Ctx {
 }
 
 async function resolveSession(user: User): Promise<Session> {
-  const email = (user.email ?? '').toLowerCase();
+  const email = (user.email ?? "").toLowerCase();
   const roles = await claimAccess(db(), {
     uid: user.uid,
     email,
@@ -120,26 +134,35 @@ export const auth = {
   /** Google 登入（建議使用學校 Google Workspace 帳號） */
   async signInWithGoogle(): Promise<Session> {
     if (USE_MOCK) {
-      sessionStorage.setItem(MOCK_SESSION_KEY, '1');
+      sessionStorage.setItem(MOCK_SESSION_KEY, "1");
       currentSession = MOCK_SESSION;
       return MOCK_SESSION;
     }
     const fb = firebase()!;
     const provider = new GoogleAuthProvider();
     const hd = import.meta.env.VITE_GOOGLE_HD as string | undefined;
-    provider.setCustomParameters({ prompt: 'select_account', ...(hd ? { hd } : {}) });
+    provider.setCustomParameters({
+      prompt: "select_account",
+      ...(hd ? { hd } : {}),
+    });
 
     try {
       const credential = await signInWithPopup(fb.auth, provider);
       return await resolveSession(credential.user);
     } catch (error) {
-      const code = (error as { code?: string }).code ?? '';
-      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+      const code = (error as { code?: string }).code ?? "";
+      if (
+        code === "auth/popup-blocked" ||
+        code === "auth/operation-not-supported-in-this-environment"
+      ) {
         await signInWithRedirect(fb.auth, provider);
         return new Promise<Session>(() => {});
       }
-      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-        throw new Error('登入已取消');
+      if (
+        code === "auth/popup-closed-by-user" ||
+        code === "auth/cancelled-popup-request"
+      ) {
+        throw new Error("登入已取消");
       }
       throw error;
     }
@@ -183,9 +206,11 @@ export const auth = {
 /** Firestore Timestamp 或 ISO 字串 → ISO 字串 */
 const toIso = (value: unknown): string | undefined => {
   if (!value) return undefined;
-  if (typeof value === 'string') return value;
+  if (typeof value === "string") return value;
   const ts = value as Timestamp;
-  return typeof ts?.toDate === 'function' ? ts.toDate().toISOString() : undefined;
+  return typeof ts?.toDate === "function"
+    ? ts.toDate().toISOString()
+    : undefined;
 };
 
 const mapInfraction = (id: string, data: DocumentData): InfractionRow => ({
@@ -193,17 +218,17 @@ const mapInfraction = (id: string, data: DocumentData): InfractionRow => ({
   studentId: data.studentId as string,
   studentNo: data.studentNo as string,
   studentName: data.studentName as string,
-  className: (data.className as string) ?? '',
+  className: (data.className as string) ?? "",
   seatNo: (data.seatNo as number | null) ?? undefined,
   typeCode: data.typeCode as string,
-  typeName: (data.typeName as string) ?? '',
-  paperCard: data.paperCard as InfractionRow['paperCard'],
-  occurredAt: (toIso(data.occurredAt) ?? (data.occurredAt as string)) ?? '',
+  typeName: (data.typeName as string) ?? "",
+  paperCard: data.paperCard as InfractionRow["paperCard"],
+  occurredAt: toIso(data.occurredAt) ?? (data.occurredAt as string) ?? "",
   occurredOn: data.occurredOn as string,
   periodNo: (data.periodNo as number) ?? 0,
-  locationName: (data.locationName as string) ?? '',
+  locationName: (data.locationName as string) ?? "",
   note: (data.note as string | null) ?? undefined,
-  status: data.status as InfractionRow['status'],
+  status: data.status as InfractionRow["status"],
   paperReturnedOn: (data.paperReturnedOn as string | null) ?? undefined,
   exemptReason: (data.exemptReason as string | null) ?? undefined,
   voidReason: (data.voidReason as string | null) ?? undefined,
@@ -215,19 +240,19 @@ const mapAlert = (id: string, data: DocumentData): AlertRow => ({
   studentId: data.studentId as string,
   studentNo: data.studentNo as string,
   studentName: data.studentName as string,
-  className: (data.className as string) ?? '',
-  triggeredAt: toIso(data.triggeredAt) ?? '',
+  className: (data.className as string) ?? "",
+  triggeredAt: toIso(data.triggeredAt) ?? "",
   windowStart: data.windowStart as string,
   windowEnd: data.windowEnd as string,
   windowDays: (data.windowDays as number) ?? 15,
   count: (data.count as number) ?? 0,
   threshold: (data.threshold as number) ?? 3,
-  status: data.status as AlertRow['status'],
+  status: data.status as AlertRow["status"],
   assignmentId: (data.assignmentId as string | null) ?? undefined,
   dutyOn: (data.dutyOn as string | null) ?? undefined,
   breakdown: ((data.breakdown as Array<DocumentData>) ?? []).map((item) => ({
     infractionId: item.infractionId as string,
-    typeName: (item.typeName as string) ?? '',
+    typeName: (item.typeName as string) ?? "",
     occurredOn: item.occurredOn as string,
   })),
 });
@@ -238,9 +263,9 @@ const mapAssignment = (id: string, data: DocumentData): AssignmentRow => ({
   studentId: data.studentId as string,
   studentNo: data.studentNo as string,
   studentName: data.studentName as string,
-  className: (data.className as string) ?? '',
+  className: (data.className as string) ?? "",
   dutyOn: data.dutyOn as string,
-  status: data.status as AssignmentRow['status'],
+  status: data.status as AssignmentRow["status"],
   totalPeriods: (data.totalPeriods as number) ?? 5,
   periodLogs: ((data.periodLogs as Array<DocumentData>) ?? []).map((log) => ({
     periodNo: log.periodNo as number,
@@ -258,11 +283,11 @@ const mapRestriction = (id: string, data: DocumentData): RestrictionRow => ({
   studentId: data.studentId as string,
   studentNo: data.studentNo as string,
   studentName: data.studentName as string,
-  className: (data.className as string) ?? '',
+  className: (data.className as string) ?? "",
   seatNo: (data.seatNo as number | null) ?? undefined,
   date: data.date as string,
-  reasons: (data.reasons as RestrictionRow['reasons']) ?? [],
-  status: data.status as RestrictionRow['status'],
+  reasons: (data.reasons as RestrictionRow["reasons"]) ?? [],
+  status: data.status as RestrictionRow["status"],
   note: (data.note as string | null) ?? undefined,
 });
 
@@ -272,40 +297,58 @@ export const api = {
   /** 公開看板：不需登入，只讀一份去識別化摘要 */
   async publicBoard(): Promise<PublicBoardData> {
     if (USE_MOCK) return mockApi.publicBoard();
-    const snap = await getDoc(doc(db(), COL.publicBoard, 'today'));
-    if (!snap.exists()) throw new Error('公開看板尚未產生');
+    const snap = await getDoc(doc(db(), COL.publicBoard, "today"));
+    if (!snap.exists()) throw new Error("公開看板尚未產生");
     const data = snap.data();
     return {
       enabled: data.enabled !== false,
       date: data.date as string,
-      updatedAt: toIso(data.updatedAt) ?? '',
-      stats: data.stats as PublicBoardData['stats'],
-      trend: (data.trend as PublicBoardData['trend']) ?? [],
-      hotspots: (data.hotspots as PublicBoardData['hotspots']) ?? [],
-      ...(data.roster ? { roster: data.roster as PublicBoardData['roster'] } : {}),
-      ...(data.observers ? { observers: data.observers as PublicBoardData['observers'] } : {}),
+      updatedAt: toIso(data.updatedAt) ?? "",
+      stats: data.stats as PublicBoardData["stats"],
+      trend: (data.trend as PublicBoardData["trend"]) ?? [],
+      hotspots: (data.hotspots as PublicBoardData["hotspots"]) ?? [],
+      ...(data.roster
+        ? { roster: data.roster as PublicBoardData["roster"] }
+        : {}),
+      ...(data.observers
+        ? { observers: data.observers as PublicBoardData["observers"] }
+        : {}),
     };
   },
 
   async infractionTypes(): Promise<InfractionTypeOption[]> {
     if (USE_MOCK) return mockApi.infractionTypes();
-    const snap = await getDocs(query(collection(db(), COL.infractionTypes), orderBy('order')));
+    const snap = await getDocs(
+      query(collection(db(), COL.infractionTypes), orderBy("order")),
+    );
+    // 尚未匯入基本資料時退回內建預設值，讓登錄畫面不會是一片空白
+    if (snap.empty) {
+      return DEFAULT_INFRACTION_TYPES.map((type) => ({
+        code: type.code,
+        name: type.name,
+        paperCard: type.paperCard,
+        paperCardLabel: type.paperCardLabel,
+        icon: type.icon,
+      }));
+    }
     return snap.docs.map((d) => ({
       code: d.id,
-      name: d.get('name') as string,
-      paperCard: d.get('paperCard') as InfractionTypeOption['paperCard'],
-      paperCardLabel: (d.get('paperCardLabel') as string) ?? '',
-      icon: d.get('icon') as string | undefined,
+      name: d.get("name") as string,
+      paperCard: d.get("paperCard") as InfractionTypeOption["paperCard"],
+      paperCardLabel: (d.get("paperCardLabel") as string) ?? "",
+      icon: d.get("icon") as string | undefined,
     }));
   },
 
   async locations(): Promise<LocationOption[]> {
     if (USE_MOCK) return mockApi.locations();
     const snap = await getDocs(collection(db(), COL.locations));
+    if (snap.empty)
+      return DEFAULT_LOCATIONS.map((location) => ({ ...location }));
     return snap.docs.map((d) => ({
       code: d.id,
-      name: d.get('name') as string,
-      isHotspot: Boolean(d.get('isHotspot')),
+      name: d.get("name") as string,
+      isHotspot: Boolean(d.get("isHotspot")),
     }));
   },
 
@@ -317,7 +360,13 @@ export const api = {
 
     const today = todayTaipei();
     const since = addDays(today, -13);
-    const [restrictionRows, pendingRows, alertRows, assignmentRows, recentSnap] = await Promise.all([
+    const [
+      restrictionRows,
+      pendingRows,
+      alertRows,
+      assignmentRows,
+      recentSnap,
+    ] = await Promise.all([
       listRestrictionsOn(ctx(), today),
       listPendingPapers(ctx()),
       listAlerts(ctx(), 50),
@@ -325,8 +374,8 @@ export const api = {
       getDocs(
         query(
           collection(db(), COL.infractions),
-          where('occurredOn', '>=', since),
-          where('occurredOn', '<=', today),
+          where("occurredOn", ">=", since),
+          where("occurredOn", "<=", today),
           fsLimit(500),
         ),
       ),
@@ -340,39 +389,45 @@ export const api = {
     );
     const alerts = alertRows
       .map((row) => mapAlert(row.id as string, row as DocumentData))
-      .filter((alert) => alert.status === 'OPEN' || alert.status === 'ASSIGNED' || alert.status === 'ACKNOWLEDGED');
+      .filter(
+        (alert) =>
+          alert.status === "OPEN" ||
+          alert.status === "ASSIGNED" ||
+          alert.status === "ACKNOWLEDGED",
+      );
     const assignments = assignmentRows.map((row) =>
       mapAssignment(row.id as string, row as DocumentData),
     );
 
     const counted = recentSnap.docs.filter(
-      (d) => d.get('status') !== 'VOIDED' && d.get('status') !== 'EXEMPTED',
+      (d) => d.get("status") !== "VOIDED" && d.get("status") !== "EXEMPTED",
     );
     const trend = Array.from({ length: 14 }, (_, index) => {
       const date = todayTaipei(index - 13);
-      const sameDay = counted.filter((d) => d.get('occurredOn') === date);
+      const sameDay = counted.filter((d) => d.get("occurredOn") === date);
       return {
         date,
-        safety: sameDay.filter((d) => d.get('paperCard') === 'SAFETY').length,
-        kindWords: sameDay.filter((d) => d.get('paperCard') === 'KIND_WORDS').length,
+        safety: sameDay.filter((d) => d.get("paperCard") === "SAFETY").length,
+        kindWords: sameDay.filter((d) => d.get("paperCard") === "KIND_WORDS")
+          .length,
       };
     });
     const hotspotMap = new Map<string, number>();
     for (const d of counted) {
-      const name = (d.get('locationName') as string) ?? '其他';
+      const name = (d.get("locationName") as string) ?? "其他";
       hotspotMap.set(name, (hotspotMap.get(name) ?? 0) + 1);
     }
 
     // 關注名單：視窗內尚未被認列、且未達門檻者
     const byStudent = new Map<string, WatchlistRow>();
     for (const d of counted) {
-      if (d.get('consumedByAlertId')) continue;
-      const studentId = d.get('studentId') as string;
+      if (d.get("consumedByAlertId")) continue;
+      const studentId = d.get("studentId") as string;
       const row = byStudent.get(studentId) ?? {
         studentId,
-        studentNo: d.get('studentNo') as string,
-        studentName: d.get('studentName') as string,
-        className: (d.get('className') as string) ?? '',
+        studentNo: d.get("studentNo") as string,
+        studentName: d.get("studentName") as string,
+        className: (d.get("className") as string) ?? "",
         count: 0,
         shortfall: settings.recidivismThreshold,
       };
@@ -387,11 +442,13 @@ export const api = {
     return {
       today,
       kpis: {
-        restrictedActive: restrictions.filter((r) => r.status === 'ACTIVE').length,
+        restrictedActive: restrictions.filter((r) => r.status === "ACTIVE")
+          .length,
         pendingPapers: pendingPapers.length,
         openAlerts: alerts.length,
         observersToday: assignments.filter((a) => a.dutyOn === today).length,
-        infractionsToday: counted.filter((d) => d.get('occurredOn') === today).length,
+        infractionsToday: counted.filter((d) => d.get("occurredOn") === today)
+          .length,
         watchlist: watchlist.length,
       },
       restrictions,
@@ -410,7 +467,9 @@ export const api = {
   async pendingPapers(): Promise<InfractionRow[]> {
     if (USE_MOCK) return mockApi.pendingPapers();
     const rows = await listPendingPapers(ctx());
-    return rows.map((row) => mapInfraction(row.id as string, row as DocumentData));
+    return rows.map((row) =>
+      mapInfraction(row.id as string, row as DocumentData),
+    );
   },
 
   async alerts(): Promise<AlertRow[]> {
@@ -422,34 +481,43 @@ export const api = {
   async assignments(): Promise<AssignmentRow[]> {
     if (USE_MOCK) return mockApi.assignments();
     const rows = await listAssignments(ctx());
-    return rows.map((row) => mapAssignment(row.id as string, row as DocumentData));
+    return rows.map((row) =>
+      mapAssignment(row.id as string, row as DocumentData),
+    );
   },
 
   async restrictions(date: string): Promise<RestrictionRow[]> {
     if (USE_MOCK) return mockApi.restrictions(date);
     const rows = await listRestrictionsOn(ctx(), date);
-    return rows.map((row) => mapRestriction(row.id as string, row as DocumentData));
+    return rows.map((row) =>
+      mapRestriction(row.id as string, row as DocumentData),
+    );
   },
 
   async searchStudent(keyword: string) {
     if (USE_MOCK) return mockApi.searchStudent(keyword);
     const trimmed = keyword.trim();
     const snap = await getDocs(
-      query(collection(db(), COL.students), where('studentNo', '==', trimmed), fsLimit(5)),
+      query(
+        collection(db(), COL.students),
+        where("studentNo", "==", trimmed),
+        fsLimit(5),
+      ),
     );
     const settings = await loadSettings(db());
-    const windowStart = addDays(todayTaipei(), -(settings.recidivismWindowDays - 1));
+    const windowStart = addDays(
+      todayTaipei(),
+      -(settings.recidivismWindowDays - 1),
+    );
     return snap.docs.map((d) => ({
       id: d.id,
-      studentNo: d.get('studentNo') as string,
-      name: d.get('name') as string,
-      className: d.get('className') as string,
-      seatNo: d.get('seatNo') as number | undefined,
+      studentNo: d.get("studentNo") as string,
+      name: d.get("name") as string,
+      className: d.get("className") as string,
+      seatNo: d.get("seatNo") as number | undefined,
       windowCount: (
-        ((d.get('recidivismWindow') as Array<{ occurredOn: string }>) ?? []).filter(
-          (entry) => entry.occurredOn >= windowStart,
-        )
-      ).length,
+        (d.get("recidivismWindow") as Array<{ occurredOn: string }>) ?? []
+      ).filter((entry) => entry.occurredOn >= windowStart).length,
     }));
   },
 
@@ -457,30 +525,48 @@ export const api = {
     if (USE_MOCK) return mockApi.student(studentId);
     const settings = await loadSettings(db());
     const today = todayTaipei();
-    const [studentSnap, historySnap, alertSnap, assignmentSnap, restrictionSnap, progress] =
-      await Promise.all([
-        getDoc(doc(db(), COL.students, studentId)),
-        getDocs(
-          query(
-            collection(db(), COL.infractions),
-            where('studentId', '==', studentId),
-            orderBy('occurredOn', 'desc'),
-            fsLimit(50),
-          ),
+    const [
+      studentSnap,
+      historySnap,
+      alertSnap,
+      assignmentSnap,
+      restrictionSnap,
+      progress,
+    ] = await Promise.all([
+      getDoc(doc(db(), COL.students, studentId)),
+      getDocs(
+        query(
+          collection(db(), COL.infractions),
+          where("studentId", "==", studentId),
+          orderBy("occurredOn", "desc"),
+          fsLimit(50),
         ),
-        getDocs(query(collection(db(), COL.recidivismAlerts), where('studentId', '==', studentId), fsLimit(20))),
-        getDocs(query(collection(db(), COL.observerAssignments), where('studentId', '==', studentId), fsLimit(20))),
-        getDoc(doc(db(), COL.recessRestrictions, `${studentId}_${today}`)),
-        readProgress(ctx(), studentId, settings),
-      ]);
-    if (!studentSnap.exists()) throw new Error('查無此學生');
+      ),
+      getDocs(
+        query(
+          collection(db(), COL.recidivismAlerts),
+          where("studentId", "==", studentId),
+          fsLimit(20),
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db(), COL.observerAssignments),
+          where("studentId", "==", studentId),
+          fsLimit(20),
+        ),
+      ),
+      getDoc(doc(db(), COL.recessRestrictions, `${studentId}_${today}`)),
+      readProgress(ctx(), studentId, settings),
+    ]);
+    if (!studentSnap.exists()) throw new Error("查無此學生");
 
     return {
       id: studentSnap.id,
-      studentNo: studentSnap.get('studentNo') as string,
-      name: studentSnap.get('name') as string,
-      className: studentSnap.get('className') as string,
-      seatNo: studentSnap.get('seatNo') as number | undefined,
+      studentNo: studentSnap.get("studentNo") as string,
+      name: studentSnap.get("name") as string,
+      className: studentSnap.get("className") as string,
+      seatNo: studentSnap.get("seatNo") as number | undefined,
       progress,
       totals: {
         infractions: historySnap.size,
@@ -489,7 +575,8 @@ export const api = {
       },
       history: historySnap.docs.map((d) => mapInfraction(d.id, d.data())),
       alerts: alertSnap.docs.map((d) => mapAlert(d.id, d.data())),
-      restrictedToday: restrictionSnap.exists() && restrictionSnap.get('status') === 'ACTIVE',
+      restrictedToday:
+        restrictionSnap.exists() && restrictionSnap.get("status") === "ACTIVE",
     };
   },
 
@@ -507,7 +594,10 @@ export const api = {
     return { ok: true, settings };
   },
 
-  async listAccess(): Promise<{ users: AccessUser[]; bootstrapAdmins: string[] }> {
+  async listAccess(): Promise<{
+    users: AccessUser[];
+    bootstrapAdmins: string[];
+  }> {
     if (USE_MOCK) return mockApi.listAccess();
     const users = (await listAccess(db())) as AccessUser[];
     return { users, bootstrapAdmins: [] };
@@ -535,7 +625,7 @@ export const api = {
       getDocs(
         query(
           collection(db(), COL.students),
-          where('studentNo', '==', input.studentNo.trim()),
+          where("studentNo", "==", input.studentNo.trim()),
           fsLimit(1),
         ),
       ),
@@ -544,7 +634,14 @@ export const api = {
     ]);
     const studentDoc = studentSnap.docs[0];
     if (!studentDoc) throw new Error(`查無學號 ${input.studentNo} 的學生`);
-    if (!typeSnap.exists()) throw new Error('查無此違規類型');
+    // 類型／地點尚未匯入時，以內建預設值成案（避免現場因基本資料未建而卡住）
+    const fallbackType = DEFAULT_INFRACTION_TYPES.find(
+      (type) => type.code === input.typeCode,
+    );
+    if (!typeSnap.exists() && !fallbackType) throw new Error("查無此違規類型");
+    const fallbackLocation = DEFAULT_LOCATIONS.find(
+      (loc) => loc.code === input.locationCode,
+    );
 
     const today = todayTaipei();
     const calendar = await loadCalendar(db(), today, addDays(today, 45));
@@ -553,21 +650,34 @@ export const api = {
       {
         student: {
           id: studentDoc.id,
-          studentNo: studentDoc.get('studentNo') as string,
-          name: studentDoc.get('name') as string,
-          classId: studentDoc.get('classId') as string,
-          className: studentDoc.get('className') as string,
-          seatNo: (studentDoc.get('seatNo') as number | null) ?? null,
+          studentNo: studentDoc.get("studentNo") as string,
+          name: studentDoc.get("name") as string,
+          classId: studentDoc.get("classId") as string,
+          className: studentDoc.get("className") as string,
+          seatNo: (studentDoc.get("seatNo") as number | null) ?? null,
         },
-        type: {
-          code: typeSnap.id,
-          name: typeSnap.get('name') as string,
-          paperCard: typeSnap.get('paperCard') as 'SAFETY' | 'KIND_WORDS',
-          countsTowardRecidivism: typeSnap.get('countsTowardRecidivism') !== false,
-        },
+        type: typeSnap.exists()
+          ? {
+              code: typeSnap.id,
+              name: typeSnap.get("name") as string,
+              paperCard: typeSnap.get("paperCard") as "SAFETY" | "KIND_WORDS",
+              countsTowardRecidivism:
+                typeSnap.get("countsTowardRecidivism") !== false,
+            }
+          : {
+              code: fallbackType!.code,
+              name: fallbackType!.name,
+              paperCard: fallbackType!.paperCard,
+              countsTowardRecidivism: fallbackType!.countsTowardRecidivism,
+            },
         location: {
           code: input.locationCode,
-          name: (locationSnap.get('name') as string) ?? input.locationCode,
+          name:
+            (locationSnap.exists()
+              ? (locationSnap.get("name") as string)
+              : undefined) ??
+            fallbackLocation?.name ??
+            input.locationCode,
         },
         periodNo: input.periodNo,
         occurredOn: today,
@@ -582,8 +692,8 @@ export const api = {
     return {
       infractionId: result.infractionId,
       studentId: studentDoc.id,
-      studentName: studentDoc.get('name') as string,
-      className: studentDoc.get('className') as string,
+      studentName: studentDoc.get("name") as string,
+      className: studentDoc.get("className") as string,
       paperCardLabel: result.paperCardLabel,
       recidivism: result.recidivism,
     };
@@ -593,10 +703,14 @@ export const api = {
     if (USE_MOCK) return mockApi.returnPaperCard(infractionId);
     const result = await markPaperReturned(ctx(), infractionId);
     await refreshBoard();
-    return { status: 'DONE', unlockOn: result.unlockOn };
+    return { status: "DONE", unlockOn: result.unlockOn };
   },
 
-  async annotate(infractionId: string, action: 'EXEMPT' | 'VOID', reason: string) {
+  async annotate(
+    infractionId: string,
+    action: "EXEMPT" | "VOID",
+    reason: string,
+  ) {
     if (USE_MOCK) return mockApi.annotate(infractionId, action, reason);
     await annotateInfraction(ctx(), { infractionId, action, reason });
     await refreshBoard();
@@ -606,7 +720,7 @@ export const api = {
   async logObserverPeriod(input: {
     assignmentId: string;
     periodNo: number;
-    action: 'CHECK_IN' | 'CHECK_OUT';
+    action: "CHECK_IN" | "CHECK_OUT";
     observedCount?: number;
     note?: string;
   }) {
@@ -625,13 +739,49 @@ export const api = {
     return result;
   },
 
-  async rescheduleDuty(assignmentId: string, dutyOn: string, reason = '生教組調整') {
+  async rescheduleDuty(
+    assignmentId: string,
+    dutyOn: string,
+    reason = "生教組調整",
+  ) {
     if (USE_MOCK) return mockApi.rescheduleDuty(assignmentId, dutyOn);
     const settings = await loadSettings(db());
     const calendar = await loadCalendar(db(), dutyOn, addDays(dutyOn, 1));
-    await rescheduleDuty(ctx(), { assignmentId, dutyOn, reason }, settings, calendar);
+    await rescheduleDuty(
+      ctx(),
+      { assignmentId, dutyOn, reason },
+      settings,
+      calendar,
+    );
     await refreshBoard();
     return { ok: true };
+  },
+
+  /** 一鍵建立內建違規類型與地點（管理者） */
+  async seedBaseData() {
+    if (USE_MOCK)
+      return {
+        types: DEFAULT_INFRACTION_TYPES.length,
+        locations: DEFAULT_LOCATIONS.length,
+      };
+    return seedBaseData(ctx());
+  },
+
+  /** 匯入學生名冊（管理者）。回傳解析錯誤，讓使用者知道哪幾行要修 */
+  async importRoster(text: string) {
+    const { rows, errors } = parseRoster(text);
+    if (rows.length === 0) {
+      throw new Error(errors[0] ?? "沒有解析到任何學生資料");
+    }
+    if (USE_MOCK) {
+      return {
+        students: rows.length,
+        classes: new Set(rows.map((r) => r.className)).size,
+        errors,
+      };
+    }
+    const result = await importStudents(ctx(), rows);
+    return { ...result, errors };
   },
 
   async dismissAlert(alertId: string, reason: string) {
