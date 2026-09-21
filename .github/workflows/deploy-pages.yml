@@ -1,10 +1,10 @@
 name: Deploy web to GitHub Pages
 
-# 前端以靜態檔案部署於 GitHub Pages；後端為 Firebase（Firestore + Cloud Functions）。
+# 前端以靜態檔案部署於 GitHub Pages；後端為 Firebase（免費 Spark 方案：Firestore + Auth）。
 # Firebase Web 設定屬公開識別資訊，但仍以 Repository secrets 管理，方便切換 dev / prod 專案。
 on:
   push:
-    # 本 repo 目前以 claude/** 分支開發（亦為預設分支），故一併納入觸發
+    # main 為正式分支（線上網站的來源）；claude/** 為開發分支，保留以便預覽
     branches: [main, 'claude/**']
     paths:
       - 'web/**'
