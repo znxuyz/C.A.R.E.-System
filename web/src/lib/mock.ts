@@ -6,6 +6,7 @@
  * 正式判定一律以 Cloud Functions 為準。
  */
 import { todayTaipei } from "./format.ts";
+import { matchStudents } from "../core/domain/studentSearch.js";
 import type {
   AccessUser,
   AlertRow,
@@ -108,48 +109,44 @@ interface MockStudent {
   seatNo: number;
 }
 
+/**
+ * 示範名冊：6 個班、24 位學生。
+ * 真實環境的名冊來自「系統設定 → 學生名冊」匯入，這裡只是讓示範模式
+ * 看得出搜尋、班級座號選擇與統計圖表的實際樣子。
+ */
 const STUDENTS: MockStudent[] = [
-  {
-    id: "stu_701_01",
-    studentNo: "1140101",
-    name: "王小明",
-    classId: "cls_701",
-    className: "七年一班",
-    seatNo: 1,
-  },
-  {
-    id: "stu_701_02",
-    studentNo: "1140102",
-    name: "李小華",
-    classId: "cls_701",
-    className: "七年一班",
-    seatNo: 2,
-  },
-  {
-    id: "stu_701_03",
-    studentNo: "1140103",
-    name: "吳承翰",
-    classId: "cls_701",
-    className: "七年一班",
-    seatNo: 3,
-  },
-  {
-    id: "stu_702_01",
-    studentNo: "1140201",
-    name: "陳小美",
-    classId: "cls_702",
-    className: "七年二班",
-    seatNo: 1,
-  },
-  {
-    id: "stu_802_05",
-    studentNo: "1130205",
-    name: "黃彥霖",
-    classId: "cls_802",
-    className: "八年二班",
-    seatNo: 5,
-  },
-];
+  ["stu_701_01", "1140101", "王小明", "cls_701", "七年一班", 1],
+  ["stu_701_02", "1140102", "李小華", "cls_701", "七年一班", 2],
+  ["stu_701_03", "1140103", "吳承翰", "cls_701", "七年一班", 3],
+  ["stu_701_04", "1140104", "林佳蓉", "cls_701", "七年一班", 4],
+  ["stu_701_05", "1140105", "張晉維", "cls_701", "七年一班", 5],
+  ["stu_702_01", "1140201", "陳小美", "cls_702", "七年二班", 1],
+  ["stu_702_02", "1140202", "黃品云", "cls_702", "七年二班", 2],
+  ["stu_702_03", "1140203", "周立翔", "cls_702", "七年二班", 3],
+  ["stu_702_04", "1140204", "蔡宜蓁", "cls_702", "七年二班", 4],
+  ["stu_801_01", "1130101", "許家豪", "cls_801", "八年一班", 1],
+  ["stu_801_02", "1130102", "鄭雅筑", "cls_801", "八年一班", 2],
+  ["stu_801_03", "1130103", "劉柏宇", "cls_801", "八年一班", 3],
+  ["stu_802_01", "1130201", "簡妤安", "cls_802", "八年二班", 1],
+  ["stu_802_05", "1130205", "黃彥霖", "cls_802", "八年二班", 5],
+  ["stu_802_06", "1130206", "徐子晴", "cls_802", "八年二班", 6],
+  ["stu_802_07", "1130207", "何昱辰", "cls_802", "八年二班", 7],
+  ["stu_901_01", "1120101", "廖婉瑜", "cls_901", "九年一班", 1],
+  ["stu_901_02", "1120102", "邱冠廷", "cls_901", "九年一班", 2],
+  ["stu_901_03", "1120103", "楊思妤", "cls_901", "九年一班", 3],
+  ["stu_901_04", "1120104", "賴宗翰", "cls_901", "九年一班", 4],
+  ["stu_902_01", "1120201", "謝宜靜", "cls_902", "九年二班", 1],
+  ["stu_902_02", "1120202", "呂承恩", "cls_902", "九年二班", 2],
+  ["stu_902_03", "1120203", "曾小軒", "cls_902", "九年二班", 3],
+  ["stu_902_04", "1120204", "洪梓瑜", "cls_902", "九年二班", 4],
+].map(([id, studentNo, name, classId, className, seatNo]) => ({
+  id: id as string,
+  studentNo: studentNo as string,
+  name: name as string,
+  classId: classId as string,
+  className: className as string,
+  seatNo: seatNo as number,
+}));
 
 interface MockInfraction extends InfractionRow {
   countsTowardRecidivism: boolean;
@@ -184,6 +181,17 @@ class MockStore {
       ),
     );
     this.triggerFor("stu_802_05", ids, this.today, "IN_PROGRESS");
+
+    // 其他班級的零星紀錄：讓趨勢圖與熱點統計看得出分布
+    this.add("stu_702_02", -11, "RUN_IN_CORRIDOR", "STAIRS_A", 1, "DONE");
+    this.add("stu_801_02", -10, "FOUL_LANGUAGE", "PLAYGROUND", 3, "DONE");
+    this.add("stu_901_02", -8, "RUN_IN_CORRIDOR", "CORRIDOR_2F", 2, "DONE");
+    this.add("stu_902_03", -7, "RUN_IN_CORRIDOR", "CORRIDOR_3F", 4, "DONE");
+    this.add("stu_801_03", -5, "FOUL_LANGUAGE", "CAFETERIA", 3, "DONE");
+    this.add("stu_902_03", -3, "FOUL_LANGUAGE", "LOBBY", 1, "DONE");
+    this.add("stu_701_04", -2, "RUN_IN_CORRIDOR", "STAIRS_A", 5, "DONE");
+    this.add("stu_901_04", -1, "RUN_IN_CORRIDOR", "CORRIDOR_2F", 2, "DONE");
+    this.add("stu_802_06", 0, "RUN_IN_CORRIDOR", "CORRIDOR_3F", 1, "OPEN");
   }
 
   student(id: string): MockStudent {
@@ -572,19 +580,27 @@ export const mockApi = {
         })),
     ),
 
+  /** 比對規則與正式環境一致（見 core/domain/studentSearch.ts）：學號／姓名／班級 */
   searchStudent: (keyword: string) => {
     const q = keyword.trim();
+    if (!q) return delay([]);
     return delay(
-      STUDENTS.filter((s) => s.studentNo.includes(q) || s.name.includes(q)).map(
-        (s) => ({
+      matchStudents(
+        STUDENTS.map((s) => ({
           id: s.id,
           studentNo: s.studentNo,
           name: s.name,
           className: s.className,
           seatNo: s.seatNo,
-          windowCount: store.countWindow(s.id),
-        }),
-      ),
+          active: true,
+          window: [],
+        })),
+        q,
+        store.today,
+      ).map((hit) => ({
+        ...hit,
+        windowCount: store.countWindow(hit.id),
+      })),
     );
   },
 
