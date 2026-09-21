@@ -24,6 +24,9 @@ import type {
  *  - 違規類型用大按鈕（只有兩類，且決定發哪一張紙本反思卡）
  *  - 送出後立即回饋：已凍結當日下課、應發哪張卡、目前累計次數
  */
+/** 候選名單一次最多顯示幾位；其餘請使用者再縮小範圍 */
+const VISIBLE_HITS = 12;
+
 interface StudentHit {
   id: string;
   studentNo: string;
@@ -42,6 +45,10 @@ export function InfractionLog() {
   // keyword 可以是學號或姓名；candidates 為比對到的候選名單
   const [keyword, setKeyword] = useState("");
   const [candidates, setCandidates] = useState<StudentHit[]>([]);
+  // 另一條找人的路：知道班級座號但不確定姓名時用
+  const [classes, setClasses] = useState<string[]>([]);
+  const [className, setClassName] = useState("");
+  const [classRoster, setClassRoster] = useState<StudentHit[]>([]);
   const [matched, setMatched] = useState<StudentHit | null>(null);
   const [typeCode, setTypeCode] = useState("");
   const [locationCode, setLocationCode] = useState("");
@@ -63,6 +70,10 @@ export function InfractionLog() {
     void api
       .settings()
       .then(setSettings)
+      .catch(() => undefined);
+    void api
+      .classList()
+      .then(setClasses)
       .catch(() => undefined);
     void api
       .locations()
@@ -97,6 +108,20 @@ export function InfractionLog() {
     };
   }, [keyword]);
 
+  useEffect(() => {
+    if (!className) {
+      setClassRoster([]);
+      return;
+    }
+    let cancelled = false;
+    void api.classRoster(className).then((rows) => {
+      if (!cancelled) setClassRoster(rows as StudentHit[]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [className]);
+
   // 回溯天數可於後台調整，畫面文案一律跟著設定走（預設 15 天）
   const windowDays = settings?.recidivismWindowDays ?? 15;
   // 已畢業／轉出的學生不得登錄（後端也會擋，這裡先讓現場知道）
@@ -127,6 +152,8 @@ export function InfractionLog() {
       toast.push(`已登錄 ${response.studentName} 的違規`);
       setKeyword("");
       setCandidates([]);
+      setClassName("");
+      setClassRoster([]);
       setTypeCode("");
       setLocationCode("");
       setNote("");
@@ -194,8 +221,12 @@ export function InfractionLog() {
                 matched
                   ? undefined
                   : candidates.length > 1
-                    ? `${candidates.length} 位相符，請點選右邊的學生`
-                    : "學號或姓名皆可，由開頭比對（學號打前幾碼、姓名打姓氏即可）"
+                    ? `${candidates.length} 位相符${
+                        candidates.length > VISIBLE_HITS
+                          ? `（先列出 ${VISIBLE_HITS} 位，請再多打幾個字縮小範圍）`
+                          : "，請點選右邊的學生"
+                      }`
+                    : "學號、姓名或班級皆可，中間的字也找得到（例：小明、六年四班）"
               }
               error={
                 keyword.trim() !== "" && candidates.length === 0
@@ -211,6 +242,47 @@ export function InfractionLog() {
                 autoFocus
               />
             </Field>
+            <Field label="或用班級座號找" hint="知道班級座號、不確定姓名時用">
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <select
+                  value={className}
+                  onChange={(event) => {
+                    setClassName(event.target.value);
+                    setMatched(null);
+                    setKeyword("");
+                    setCandidates([]);
+                  }}
+                  style={{ maxWidth: 160 }}
+                >
+                  <option value="">選班級</option>
+                  {classes.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={matched && className ? matched.id : ""}
+                  disabled={!className}
+                  onChange={(event) =>
+                    setMatched(
+                      classRoster.find(
+                        (row) => row.id === event.target.value,
+                      ) ?? null,
+                    )
+                  }
+                  style={{ maxWidth: 200 }}
+                >
+                  <option value="">選座號</option>
+                  {classRoster.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.seatNo ? `${row.seatNo} 號` : "—"}　{row.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </Field>
+
             <Field label="學生">
               <div className="row" style={{ minHeight: 40 }}>
                 {matched ? (
@@ -234,7 +306,7 @@ export function InfractionLog() {
                   </>
                 ) : candidates.length > 0 ? (
                   <div className="hit-list">
-                    {candidates.map((hit) => (
+                    {candidates.slice(0, VISIBLE_HITS).map((hit) => (
                       <button
                         key={hit.id}
                         type="button"
@@ -247,6 +319,11 @@ export function InfractionLog() {
                         {hit.active === false && "・已離校"}
                       </button>
                     ))}
+                    {candidates.length > VISIBLE_HITS && (
+                      <span className="muted small">
+                        還有 {candidates.length - VISIBLE_HITS} 位…
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <span className="muted small">待比對</span>
@@ -261,6 +338,7 @@ export function InfractionLog() {
                     setMatched(null);
                     setKeyword("");
                     setCandidates([]);
+                    setClassName("");
                   }}
                 >
                   換一位

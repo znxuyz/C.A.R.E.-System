@@ -64,6 +64,10 @@ import { listRestrictionsOn } from "../core/services/restrictions.ts";
 import { loadSettings, updateSettings } from "../core/services/settings.ts";
 import { addDays } from "../core/domain/dates.ts";
 import {
+  matchStudents,
+  type StudentIndexEntry,
+} from "../core/domain/studentSearch.ts";
+import {
   DEFAULT_INFRACTION_TYPES,
   DEFAULT_LOCATIONS,
 } from "../core/domain/defaults.ts";
@@ -512,55 +516,71 @@ export const api = {
    * `>= kw` 且 `<= kw + \uf8ff` 等同「以 kw 開頭」。
    * 因此學號打前幾碼、姓氏打一個字都找得到，兩邊各查一次再合併去重。
    */
+  /**
+   * 以學號、姓名或班級搜尋學生。
+   *
+   * Firestore 只能做前綴比對（打「小明」找不到王小明），而且每次查詢都要付讀取，
+   * 因此改成：**整份名冊讀一次進記憶體**，之後在前端做子字串比對。
+   * 一所學校幾百到一兩千人，一次讀取即可支撐整個工作階段，
+   * 也順便解決「結果被截斷」與「只能從開頭比對」兩個問題。
+   */
+  /**
+   * 以學號、姓名或班級搜尋學生。
+   *
+   * Firestore 只能做前綴比對（打「小明」找不到王小明），而且每次查詢都要付讀取，
+   * 因此改成：**整份名冊讀一次進記憶體**，之後在前端做子字串比對。
+   * 一所學校幾百到一兩千人，一次讀取即可支撐整個工作階段，
+   * 也順便解決「結果被截斷」與「只能從開頭比對」兩個問題。
+   * 比對規則見 `core/domain/studentSearch.ts`（純函式，有單元測試）。
+   */
   async searchStudent(keyword: string) {
     if (USE_MOCK) return mockApi.searchStudent(keyword);
     const trimmed = keyword.trim();
     if (!trimmed) return [];
-    const end = `${trimmed}\uf8ff`;
-    const byField = (field: "studentNo" | "name") =>
-      getDocs(
-        query(
-          collection(db(), COL.students),
-          where(field, ">=", trimmed),
-          where(field, "<=", end),
-          fsLimit(8),
-        ),
-      );
 
-    const [byNo, byName, settings] = await Promise.all([
-      byField("studentNo"),
-      byField("name"),
+    const [index, settings] = await Promise.all([
+      loadRosterIndex(),
       loadSettings(db()),
     ]);
     const windowStart = addDays(
       todayTaipei(),
       -(settings.recidivismWindowDays - 1),
     );
+    return matchStudents(index, trimmed, windowStart);
+  },
 
-    const seen = new Set<string>();
-    return (
-      [...byNo.docs, ...byName.docs]
-        .filter((d) => (seen.has(d.id) ? false : seen.add(d.id) !== undefined))
-        .map((d) => ({
-          id: d.id,
-          studentNo: d.get("studentNo") as string,
-          name: d.get("name") as string,
-          className: d.get("className") as string,
-          seatNo: d.get("seatNo") as number | undefined,
-          active: d.get("active") !== false,
-          windowCount: (
-            (d.get("recidivismWindow") as Array<{ occurredOn: string }>) ?? []
-          ).filter((entry) => entry.occurredOn >= windowStart).length,
-        }))
-        // 在校生排前面，其次依班級、座號
-        .sort(
-          (x, y) =>
-            Number(y.active) - Number(x.active) ||
-            x.className.localeCompare(y.className, "zh-Hant") ||
-            (x.seatNo ?? 0) - (y.seatNo ?? 0),
-        )
-        .slice(0, 8)
+  /** 班級清單（取自名冊索引，不另外查 Firestore） */
+  async classList(): Promise<string[]> {
+    if (USE_MOCK) return mockApi.classList();
+    const index = await loadRosterIndex();
+    return [...new Set(index.filter((s) => s.active).map((s) => s.className))]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  },
+
+  /** 某班的在校學生，依座號排序（現場用班級＋座號找人） */
+  async classRoster(className: string) {
+    if (USE_MOCK) return mockApi.classRoster(className);
+    const [index, settings] = await Promise.all([
+      loadRosterIndex(),
+      loadSettings(db()),
+    ]);
+    const windowStart = addDays(
+      todayTaipei(),
+      -(settings.recidivismWindowDays - 1),
     );
+    return index
+      .filter((s) => s.active && s.className === className)
+      .sort((a, b) => (a.seatNo ?? 0) - (b.seatNo ?? 0))
+      .map((s) => ({
+        id: s.id,
+        studentNo: s.studentNo,
+        name: s.name,
+        className: s.className,
+        ...(s.seatNo === null ? {} : { seatNo: s.seatNo }),
+        active: s.active,
+        windowCount: s.window.filter((day) => day >= windowStart).length,
+      }));
   },
 
   async student(studentId: string): Promise<StudentDetail> {
@@ -739,6 +759,8 @@ export const api = {
       calendar,
     );
     await rebuildPublicBoard(ctx(), settings).catch(() => undefined);
+    // 再犯次數變了，下次搜尋重新讀名冊索引
+    invalidateRosterIndex();
 
     return {
       infractionId: result.infractionId,
@@ -903,6 +925,7 @@ export const api = {
       existing,
       deactivateMissing: mode === "REPLACE",
     });
+    invalidateRosterIndex();
     return { ...result, errors };
   },
 
@@ -915,8 +938,64 @@ export const api = {
   },
 };
 
+/* ----------------------------- 名冊索引快取 ----------------------------- */
+
+const ROSTER_INDEX_KEY = "care.rosterIndex";
+/** 名冊異動頻率低，30 分鐘內沿用快取；登錄違規後會主動失效 */
+const ROSTER_INDEX_TTL = 30 * 60 * 1000;
+
+let rosterIndex: { at: number; rows: StudentIndexEntry[] } | null = null;
+
+function readCachedIndex(): { at: number; rows: StudentIndexEntry[] } | null {
+  if (rosterIndex) return rosterIndex;
+  try {
+    const raw = sessionStorage.getItem(ROSTER_INDEX_KEY);
+    if (!raw) return null;
+    rosterIndex = JSON.parse(raw) as { at: number; rows: StudentIndexEntry[] };
+    return rosterIndex;
+  } catch {
+    return null;
+  }
+}
+
+/** 整份名冊讀一次；重新整理頁面時沿用 sessionStorage，避免重複計費讀取 */
+async function loadRosterIndex(): Promise<StudentIndexEntry[]> {
+  const cached = readCachedIndex();
+  if (cached && Date.now() - cached.at < ROSTER_INDEX_TTL) return cached.rows;
+
+  const snap = await getDocs(collection(db(), COL.students));
+  const rows: StudentIndexEntry[] = snap.docs.map((d) => ({
+    id: d.id,
+    studentNo: (d.get("studentNo") as string) ?? "",
+    name: (d.get("name") as string) ?? "",
+    className: (d.get("className") as string) ?? "",
+    seatNo: (d.get("seatNo") as number | null) ?? null,
+    active: d.get("active") !== false,
+    window: ((d.get("recidivismWindow") as Array<{ occurredOn: string }>) ?? [])
+      .map((entry) => entry.occurredOn)
+      .filter(Boolean),
+  }));
+  rosterIndex = { at: Date.now(), rows };
+  try {
+    sessionStorage.setItem(ROSTER_INDEX_KEY, JSON.stringify(rosterIndex));
+  } catch {
+    /* 配額不足時只用記憶體快取即可 */
+  }
+  return rows;
+}
+
+/** 名冊或再犯次數有異動時呼叫，下次搜尋會重新讀取 */
+function invalidateRosterIndex(): void {
+  rosterIndex = null;
+  try {
+    sessionStorage.removeItem(ROSTER_INDEX_KEY);
+  } catch {
+    /* 忽略 */
+  }
+}
+
 /**
- * 違規類型／地點集合仍為空（畫面上顯示的是內建預設值）時，
+ * 違規類型／地點集合仍為空（畫面上顯示的是內建預設值），
  * 先把預設值寫進 Firestore 再讓使用者增刪，否則刪掉一筆之後預設值又會整組冒出來。
  */
 async function materializeCatalog(): Promise<void> {
