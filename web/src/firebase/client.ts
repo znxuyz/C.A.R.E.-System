@@ -10,17 +10,21 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
-import { getFunctions, type Functions } from 'firebase/functions';
+import { DEFAULT_FIREBASE_CONFIG } from './config.js';
 
 const env = import.meta.env;
 
+/** 環境變數優先，未設定時採用 config.ts 的預設專案 */
 export const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY as string | undefined,
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
-  projectId: env.VITE_FIREBASE_PROJECT_ID as string | undefined,
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined,
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined,
-  appId: env.VITE_FIREBASE_APP_ID as string | undefined,
+  apiKey: (env.VITE_FIREBASE_API_KEY as string) || DEFAULT_FIREBASE_CONFIG.apiKey,
+  authDomain: (env.VITE_FIREBASE_AUTH_DOMAIN as string) || DEFAULT_FIREBASE_CONFIG.authDomain,
+  projectId: (env.VITE_FIREBASE_PROJECT_ID as string) || DEFAULT_FIREBASE_CONFIG.projectId,
+  storageBucket:
+    (env.VITE_FIREBASE_STORAGE_BUCKET as string) || DEFAULT_FIREBASE_CONFIG.storageBucket,
+  messagingSenderId:
+    (env.VITE_FIREBASE_MESSAGING_SENDER_ID as string) ||
+    DEFAULT_FIREBASE_CONFIG.messagingSenderId,
+  appId: (env.VITE_FIREBASE_APP_ID as string) || DEFAULT_FIREBASE_CONFIG.appId,
 };
 
 export const USE_MOCK =
@@ -30,7 +34,6 @@ interface FirebaseBundle {
   app: FirebaseApp;
   auth: Auth;
   db: Firestore;
-  functions: Functions;
 }
 
 let bundle: FirebaseBundle | null = null;
@@ -39,12 +42,7 @@ export function firebase(): FirebaseBundle | null {
   if (USE_MOCK) return null;
   if (!bundle) {
     const app = initializeApp(firebaseConfig as Required<typeof firebaseConfig>);
-    bundle = {
-      app,
-      auth: getAuth(app),
-      db: getFirestore(app),
-      functions: getFunctions(app, (env.VITE_FUNCTIONS_REGION as string) ?? 'asia-east1'),
-    };
+    bundle = { app, auth: getAuth(app), db: getFirestore(app) };
   }
   return bundle;
 }

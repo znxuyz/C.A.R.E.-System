@@ -48,29 +48,45 @@
 3. 規則模式選 **「以正式版模式啟動」**（稍後會用指令部署本專案的規則覆蓋它）
 4. **建立**
 
-### 1-4. 新增網頁應用程式並複製設定
+### 1-4. 新增網頁應用程式
 
 1. 回 **專案總覽** → 點 **`</>`（網頁）** 圖示
 2. 暱稱填 `care-web`，**不要勾** Firebase Hosting（我們用 GitHub Pages）→ 註冊應用程式
-3. 畫面顯示的 `firebaseConfig` 六個值**複製下來**（§3 要用）：
+3. 畫面會顯示一段 `firebaseConfig` —— **本專案已內建 `caresystem-1ba4b` 的設定**，
+   若你用的就是這個專案，這段可以直接略過。
+   要換成別的專案時，把那六個值填進 `web/src/firebase/config.ts` 即可。
 
-```js
-const firebaseConfig = {
-  apiKey: "AIza...",
-  authDomain: "care-system-a1b2c.firebaseapp.com",
-  projectId: "care-system-a1b2c",
-  storageBucket: "care-system-a1b2c.firebasestorage.app",
-  messagingSenderId: "123456789012",
-  appId: "1:123456789012:web:abcdef1234567890"
-};
-```
+## 2. 設定安全規則與索引（約 5 分鐘）
 
-> 這些值屬**公開識別資訊**，被看到不等於資料外洩 ——
-> 真正的防線是 Firestore 安全規則（本專案已寫好並有測試）。
+這一步是把「誰能讀寫什麼」的規則送上 Firebase。
+**兩種做法擇一**：不想裝任何東西就用方式 A，全程在網頁上完成。
 
----
+### 方式 A：在 Console 貼上（不需終端機、不需安裝）
 
-## 2. 部署安全規則與索引（終端機，約 5 分鐘）
+1. Console → **Firestore Database → 規則（Rules）** 分頁
+2. 開啟專案裡的 [`firestore.rules`](../firestore.rules)
+   （GitHub 網頁上點該檔案 → 右上角複製按鈕即可），**全選複製**
+3. 貼進 Console 的編輯器，**取代原本全部內容** → 按 **發布（Publish）**
+4. 索引：切到 **索引（Indexes）** 分頁 → **新增索引**，依下表建立 6 筆
+   （集合 ID 與欄位要完全一致；查詢範圍都選「集合」）
+
+| # | 集合 ID | 欄位 1 | 欄位 2 | 欄位 3 |
+|---|---|---|---|---|
+| 1 | `infractions` | `status` 遞增 | `occurredOn` **遞減** | — |
+| 2 | `infractions` | `status` 遞增 | `occurredOn` 遞增 | — |
+| 3 | `infractions` | `studentId` 遞增 | `occurredOn` **遞減** | — |
+| 4 | `recessRestrictions` | `date` 遞增 | `className` 遞增 | — |
+| 5 | `recessRestrictions` | `studentId` 遞增 | `status` 遞增 | `date` 遞增 |
+| 6 | `observerAssignments` | `status` 遞增 | `dutyOn` 遞增 | — |
+
+> 懶人法：索引也可以不先建。缺索引時系統會出錯，
+> 瀏覽器的開發者工具 Console 會印出一行含連結的訊息
+> （`The query requires an index. You can create it here: https://...`），
+> 點那個連結就會直接帶你到「建立索引」畫面並自動填好欄位，按下建立即可。
+
+### 方式 B：用終端機一行指令（適合之後還會改規則）
+
+在你自己的電腦上（Windows/Mac 都可以）：
 
 ```bash
 npm install -g firebase-tools
@@ -79,35 +95,35 @@ firebase login                 # 瀏覽器會跳出 Google 授權
 git clone https://github.com/znxuyz/C.A.R.E.-System.git
 cd C.A.R.E.-System
 npm ci
-
-firebase use --add             # 選剛建立的專案，別名輸入 default
-npm run deploy:rules           # 部署 firestore.rules 與複合索引
+npm run deploy:rules           # 規則 + 6 筆索引一次送上
 ```
 
-**確認索引已建立**：Console → Firestore Database → **索引（Indexes）** 分頁，
-應有數筆複合索引，狀態逐一變成 **「已啟用」**（約 1–2 分鐘）。
+> 專案 ID 已寫在 `.firebaserc`，不需要再跑 `firebase use --add`。
 
-> 沒有 Cloud Functions 要部署，所以這一步很快，也不會有任何計費項目。
+### 確認結果
 
----
+Console → Firestore Database → **索引** 分頁，6 筆索引狀態都變成
+**「已啟用」（Enabled）**（約 1–2 分鐘）即完成。
+
+> **為什麼一定要做這一步**：Firestore 建立時若選「測試模式」，
+> 會套用一份 30 天後失效的全開放規則 —— 那段期間**任何人**都能讀寫你的資料庫，
+> 到期後則全部拒絕、系統直接不能用。本專案的規則才是真正的防線
+> （27 項自動化測試涵蓋提權、竄改時間戳、刪除紀錄等情境）。
 
 ## 3. 部署前端到 GitHub Pages（約 5 分鐘）
 
-### 3-1. 設定 Secrets
+### 3-1. Firebase 設定（已內建，不需操作）
 
-GitHub repository → **Settings → Secrets and variables → Actions → New repository secret**，
-逐一新增（值就是 §1-4 複製的六個）：
+專案已內建這個 Firebase 專案的設定（`web/src/firebase/config.ts`），
+因此**不需要設定任何 GitHub Secrets**。
 
-| Secret 名稱 | 對應 firebaseConfig 欄位 |
-|---|---|
-| `VITE_FIREBASE_API_KEY` | `apiKey` |
-| `VITE_FIREBASE_AUTH_DOMAIN` | `authDomain` |
-| `VITE_FIREBASE_PROJECT_ID` | `projectId` |
-| `VITE_FIREBASE_STORAGE_BUCKET` | `storageBucket` |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `messagingSenderId` |
-| `VITE_FIREBASE_APP_ID` | `appId` |
-
-（選填）只想讓學校網域登入 → 再加 `VITE_GOOGLE_HD` = `example.edu.tw`。
+> 為什麼直接寫在原始碼裡：Firebase 的網頁設定（apiKey 等）**本來就是公開資訊** ——
+> 網站部署後，瀏覽器下載的 JS 檔一定會包含這些值，任何人檢視原始碼都看得到，
+> 用 Secrets 隱藏並無實質效果（Google 官方文件亦如此說明）。
+> 真正的防線是：① Firestore 安全規則 ② 已授權網域（§3-4）
+> ③ 金鑰的網域限制（§3-5，建議做）。
+>
+> 若日後要改用別的 Firebase 專案，設定 `VITE_FIREBASE_*` 環境變數即可覆蓋。
 
 ### 3-2. 確認 Pages 來源
 
@@ -123,6 +139,17 @@ GitHub repository → **Settings → Secrets and variables → Actions → New r
 
 Console → **Authentication → 設定（Settings）→ 已授權網域** → **新增網域**
 → 輸入 `<你的帳號>.github.io` → 儲存。
+
+### 3-5. 限制 API 金鑰只能被你的網站使用（建議）
+
+1. 開啟 https://console.cloud.google.com/apis/credentials （選同一個專案）
+2. 找到 **Browser key (auto created by Firebase)** → 點進去
+3. **應用程式限制** 選「HTTP 參照網址」→ 新增：
+   - `https://<你的帳號>.github.io/*`
+   - `http://localhost:5173/*`（本機開發用）
+4. 儲存
+
+這樣即使金鑰被複製，也只有你的網站能使用它。
 
 ---
 

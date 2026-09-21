@@ -76,7 +76,7 @@ web/src/core/services/      以 Firestore 交易實作：違規登錄、觀察�
 web/src/pages/              公開看板 + 生教組 7 頁
 web/test/                   單元測試 33 項 + 模擬器安全規則測試 27 項
 firestore.rules             唯一防線：權限判定 + 每筆寫入的形狀與時間戳驗證
-firestore.indexes.json      複合索引
+firestore.indexes.json      6 筆複合索引（也可在 Console 手動建立）
 seed/                       管理者授權、系統參數、違規類型、地點、示範資料
 docs/                       架構、綱要、演算法、UI 規劃、設定手冊
 ```

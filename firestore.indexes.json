@@ -1,28 +1,26 @@
 {
+  "//": "重構為免費方案架構後，實際需要的複合索引只剩 6 筆（單欄位查詢由 Firestore 自動建立）",
   "indexes": [
     {
-      "//": "核心：再犯 15 天視窗查詢（studentId + 旗標 + status IN + occurredOn 範圍）",
+      "//": "待回收紙本清單：status == 'OPEN' + 依違規日新到舊",
       "collectionGroup": "infractions",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "studentId", "order": "ASCENDING" },
-        { "fieldPath": "countsTowardRecidivism", "order": "ASCENDING" },
-        { "fieldPath": "consumedByAlertId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "occurredOn", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "每日續帳：status == 'OPEN' + occurredOn < 今天",
+      "collectionGroup": "infractions",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "occurredOn", "order": "ASCENDING" }
       ]
     },
     {
-      "//": "待回收紙本清單 / 排程續帳（狀態 + 發生日）",
-      "collectionGroup": "infractions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "occurredOn", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "//": "學生個人違規歷程",
+      "//": "學生個人違規歷程：studentId + 依違規日新到舊",
       "collectionGroup": "infractions",
       "queryScope": "COLLECTION",
       "fields": [
@@ -31,16 +29,7 @@
       ]
     },
     {
-      "//": "班級統計",
-      "collectionGroup": "infractions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "classId", "order": "ASCENDING" },
-        { "fieldPath": "occurredOn", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "//": "今日管制名單（依班級排序）",
+      "//": "今日下課管制名單：date == 今天 + 依班級排序",
       "collectionGroup": "recessRestrictions",
       "queryScope": "COLLECTION",
       "fields": [
@@ -49,7 +38,7 @@
       ]
     },
     {
-      "//": "解鎖處理：某生仍在管制中的日期",
+      "//": "解鎖處理：某生仍在管制中的日期（studentId + status + date 範圍）",
       "collectionGroup": "recessRestrictions",
       "queryScope": "COLLECTION",
       "fields": [
@@ -59,21 +48,12 @@
       ]
     },
     {
-      "//": "安全觀察員追蹤清單（未結案 + 值勤日）",
+      "//": "安全觀察員追蹤清單：status IN [...] + 依值勤日排序",
       "collectionGroup": "observerAssignments",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "dutyOn", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "//": "再犯警示清單（待處理優先）",
-      "collectionGroup": "recidivismAlerts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "triggeredAt", "order": "DESCENDING" }
       ]
     }
   ],

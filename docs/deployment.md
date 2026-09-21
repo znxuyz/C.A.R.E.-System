@@ -30,7 +30,6 @@ npm run test:rules         # 27 項安全規則測試（自動啟動 Firestore �
 npm run typecheck
 
 # ③ 連本機模擬器開發
-cp .firebaserc.example .firebaserc     # 填入自己的專案 ID
 npm run emulators
 FIRESTORE_EMULATOR_HOST=localhost:8080 GCLOUD_PROJECT=care-system-dev npm run seed:demo
 ```
@@ -38,9 +37,13 @@ FIRESTORE_EMULATOR_HOST=localhost:8080 GCLOUD_PROJECT=care-system-dev npm run se
 ## 2. 部署
 
 ```bash
-firebase use --add        # 選擇專案（僅第一次）
-npm run deploy:rules      # 部署 firestore.rules 與複合索引
+npm run deploy:rules      # 部署 firestore.rules 與 6 筆複合索引
 ```
+
+專案 ID 已寫在 `.firebaserc`（`caresystem-1ba4b`），不需要 `firebase use --add`。
+**不想用終端機也可以**：直接把 `firestore.rules` 的內容貼進
+Console → Firestore → 規則 → 發布，索引則在「索引」分頁手動建立
+（清單見 [設定手冊 §2](firebase-setup.md#2-設定安全規則與索引約-5-分鐘)）。
 
 前端由 GitHub Actions 自動部署（推送到預設分支即觸發），
 或到 **Actions → Deploy web to GitHub Pages → Run workflow** 手動執行。
