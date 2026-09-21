@@ -452,6 +452,8 @@ const buildHotspots = () => {
 };
 
 export const mockApi = {
+  progress: (studentId: string) => delay(store.progress(studentId)),
+
   infractionTypes: () => delay(TYPES),
   locations: () => delay(LOCATIONS),
 

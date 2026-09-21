@@ -8,24 +8,26 @@
  *  - publicBoard/today                            去識別化公開摘要
  */
 export const COL = {
-  students: 'students',
-  classes: 'classes',
-  staff: 'staff',
-  accessGrants: 'accessGrants',
-  infractionTypes: 'infractionTypes',
-  locations: 'locations',
-  infractions: 'infractions',
-  recessRestrictions: 'recessRestrictions',
-  recidivismAlerts: 'recidivismAlerts',
-  observerAssignments: 'observerAssignments',
-  publicBoard: 'publicBoard',
-  auditLogs: 'auditLogs',
-  schoolCalendar: 'schoolCalendar',
-  settings: 'settings',
+  students: "students",
+  /** 搜尋用的名冊聚合索引（少數幾份文件，取代逐份讀取 students） */
+  rosterIndex: "rosterIndex",
+  classes: "classes",
+  staff: "staff",
+  accessGrants: "accessGrants",
+  infractionTypes: "infractionTypes",
+  locations: "locations",
+  infractions: "infractions",
+  recessRestrictions: "recessRestrictions",
+  recidivismAlerts: "recidivismAlerts",
+  observerAssignments: "observerAssignments",
+  publicBoard: "publicBoard",
+  auditLogs: "auditLogs",
+  schoolCalendar: "schoolCalendar",
+  settings: "settings",
 } as const;
 
-export const SETTINGS_DOC = 'system';
-export const PUBLIC_BOARD_DOC = 'today';
+export const SETTINGS_DOC = "system";
+export const PUBLIC_BOARD_DOC = "today";
 
 export const restrictionId = (studentId: string, date: string): string =>
   `${studentId}_${date}`;

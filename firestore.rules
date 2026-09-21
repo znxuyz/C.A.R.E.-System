@@ -143,6 +143,16 @@ service cloud.firestore {
       allow update: if isAdmin() || (isStaff() && onlyChanges(['recidivismWindow']));
     }
 
+    /**
+     * 名冊搜尋索引（少數幾份聚合文件，取代逐份讀 students 以節省讀取額度）。
+     * 內容是 students 的子集（學號／姓名／班級／座號／在校），
+     * 因此讀取權限與 students 相同：僅限生教組，不對外公開。
+     */
+    match /rosterIndex/{chunkId} {
+      allow read: if isStaff();
+      allow write: if isAdmin() && serverTime('updatedAt');
+    }
+
     match /classes/{classId} {
       allow read: if isStaff();
       allow write: if isAdmin();

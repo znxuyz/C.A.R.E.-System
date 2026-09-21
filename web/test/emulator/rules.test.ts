@@ -314,6 +314,24 @@ describe('系統管理者', () => {
     );
   });
 
+  it('可重建名冊索引（管理者），且時間戳必須由伺服器產生', async () => {
+    const db = as(ADMIN_UID, ADMIN_EMAIL);
+    await assertSucceeds(
+      setDoc(doc(db, 'rosterIndex', 'chunk_0'), {
+        students: [{ id: 'stu_1', studentNo: '1140101', name: '王小明', className: '七年一班', seatNo: 1, active: true }],
+        count: 1,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db, 'rosterIndex', 'chunk_0'), {
+        students: [],
+        count: 0,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+  });
+
   it('可調整系統設定，但超出合理範圍會被拒絕', async () => {
     const db = as(ADMIN_UID, ADMIN_EMAIL);
     await assertSucceeds(

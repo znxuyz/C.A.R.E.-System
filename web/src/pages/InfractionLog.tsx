@@ -49,6 +49,8 @@ export function InfractionLog() {
   const [classes, setClasses] = useState<string[]>([]);
   const [className, setClassName] = useState("");
   const [classRoster, setClassRoster] = useState<StudentHit[]>([]);
+  // 選定學生後才查他的再犯次數（1 次讀取），名冊索引本身不存這個數字
+  const [windowCount, setWindowCount] = useState<number | null>(null);
   const [matched, setMatched] = useState<StudentHit | null>(null);
   const [typeCode, setTypeCode] = useState("");
   const [locationCode, setLocationCode] = useState("");
@@ -121,6 +123,23 @@ export function InfractionLog() {
       cancelled = true;
     };
   }, [className]);
+
+  useEffect(() => {
+    if (!matched) {
+      setWindowCount(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .studentProgress(matched.id)
+      .then((progress) => {
+        if (!cancelled) setWindowCount(progress.count);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [matched]);
 
   // 回溯天數可於後台調整，畫面文案一律跟著設定走（預設 15 天）
   const windowDays = settings?.recidivismWindowDays ?? 15;
@@ -293,16 +312,11 @@ export function InfractionLog() {
                       {matched.seatNo ? ` ${matched.seatNo} 號` : ""}
                     </Badge>
                     {inactive && <Badge tone="critical">已畢業／轉出</Badge>}
-                    {typeof matched.windowCount === "number" &&
-                      matched.windowCount > 0 && (
-                        <Badge
-                          tone={
-                            matched.windowCount >= 2 ? "critical" : "warning"
-                          }
-                        >
-                          {windowDays} 天內 {matched.windowCount} 次
-                        </Badge>
-                      )}
+                    {windowCount !== null && windowCount > 0 && (
+                      <Badge tone={windowCount >= 2 ? "critical" : "warning"}>
+                        {windowDays} 天內 {windowCount} 次
+                      </Badge>
+                    )}
                   </>
                 ) : candidates.length > 0 ? (
                   <div className="hit-list">

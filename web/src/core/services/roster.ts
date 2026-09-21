@@ -24,6 +24,7 @@ import {
 } from "../domain/defaults.js";
 import { auditDoc, type Ctx } from "./context.js";
 import type { PaperCard } from "../domain/types.js";
+import { writeRosterIndex } from "./rosterIndex.js";
 
 /** Firestore 單次批次上限 500 筆；留一點餘裕 */
 const BATCH_LIMIT = 400;
@@ -348,6 +349,35 @@ export async function importStudents(
 
   if (queued > 0) commits.push(batch.commit());
   await Promise.all(commits);
+
+  // 重建搜尋索引：把匯入後的完整名冊壓成少數幾份聚合文件，
+  // 之後搜尋只要讀那幾份，不必逐份讀 students
+  const deactivated = new Set(toDeactivate.map((student) => student.id));
+  const byId = new Map(
+    (options.existing ?? []).map((student) => [
+      student.id,
+      {
+        id: student.id,
+        studentNo: student.studentNo,
+        name: student.name,
+        className: student.className,
+        seatNo: student.seatNo,
+        active: student.active && !deactivated.has(student.id),
+      },
+    ]),
+  );
+  rows.forEach((row) => {
+    const id = studentDocId(row.studentNo);
+    byId.set(id, {
+      id,
+      studentNo: row.studentNo,
+      name: row.name,
+      className: row.className,
+      seatNo: row.seatNo,
+      active: true,
+    });
+  });
+  await writeRosterIndex(ctx, [...byId.values()]);
 
   const summary = {
     students: rows.length,

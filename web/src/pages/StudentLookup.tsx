@@ -27,7 +27,7 @@ export function StudentLookup() {
       name: string;
       className: string;
       seatNo?: number;
-      windowCount?: number;
+      active?: boolean;
     }>
   >([]);
   const [detail, setDetail] = useState<StudentDetail | null>(null);
@@ -241,7 +241,7 @@ export function StudentLookup() {
                   <th>座號</th>
                   <th>學號</th>
                   <th>姓名</th>
-                  <th>15 天內次數</th>
+                  <th>狀態</th>
                   <th />
                 </tr>
               </thead>
@@ -252,15 +252,11 @@ export function StudentLookup() {
                     <td className="num">{row.seatNo ?? "—"}</td>
                     <td className="num">{row.studentNo}</td>
                     <td className="cell-strong">{row.name}</td>
-                    <td className="num">
-                      {typeof row.windowCount === "number" ? (
-                        <Badge
-                          tone={row.windowCount >= 2 ? "critical" : "neutral"}
-                        >
-                          {row.windowCount} / 3
-                        </Badge>
+                    <td>
+                      {row.active === false ? (
+                        <Badge tone="neutral">已畢業／轉出</Badge>
                       ) : (
-                        "—"
+                        <span className="muted small">在校</span>
                       )}
                     </td>
                     <td>

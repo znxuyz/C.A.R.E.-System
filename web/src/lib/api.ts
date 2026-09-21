@@ -68,6 +68,10 @@ import {
   type StudentIndexEntry,
 } from "../core/domain/studentSearch.ts";
 import {
+  readRosterIndex,
+  writeRosterIndex,
+} from "../core/services/rosterIndex.ts";
+import {
   DEFAULT_INFRACTION_TYPES,
   DEFAULT_LOCATIONS,
 } from "../core/domain/defaults.ts";
@@ -369,7 +373,7 @@ export const api = {
 
   async dashboard(): Promise<DashboardData> {
     if (USE_MOCK) return mockApi.dashboard();
-    const settings = await loadSettings(db());
+    const settings = await cachedSettings();
     // 每天第一次開啟時續帳並重建公開看板（取代付費方案的排程函式）
     await runDailySyncIfNeeded(ctx(), settings).catch(() => undefined);
 
@@ -540,7 +544,7 @@ export const api = {
 
     const [index, settings] = await Promise.all([
       loadRosterIndex(),
-      loadSettings(db()),
+      cachedSettings(),
     ]);
     const windowStart = addDays(
       todayTaipei(),
@@ -563,7 +567,7 @@ export const api = {
     if (USE_MOCK) return mockApi.classRoster(className);
     const [index, settings] = await Promise.all([
       loadRosterIndex(),
-      loadSettings(db()),
+      cachedSettings(),
     ]);
     const windowStart = addDays(
       todayTaipei(),
@@ -583,9 +587,18 @@ export const api = {
       }));
   },
 
+  /**
+   * 單一學生的再犯進度（選定學生後才查，1 次讀取）。
+   * 名冊索引刻意不存這個數字 —— 它每次登錄都會變，放進索引就得跟著改寫。
+   */
+  async studentProgress(studentId: string) {
+    if (USE_MOCK) return mockApi.progress(studentId);
+    return readProgress(ctx(), studentId, await cachedSettings());
+  },
+
   async student(studentId: string): Promise<StudentDetail> {
     if (USE_MOCK) return mockApi.student(studentId);
-    const settings = await loadSettings(db());
+    const settings = await cachedSettings();
     const today = todayTaipei();
     const [
       studentSnap,
@@ -646,12 +659,13 @@ export const api = {
 
   async settings(): Promise<SystemSettings> {
     if (USE_MOCK) return mockApi.settings();
-    return loadSettings(db());
+    return cachedSettings();
   },
 
   async updateSettings(patch: Partial<SystemSettings>) {
     if (USE_MOCK) return mockApi.updateSettings(patch);
     const settings = await updateSettings(ctx(), patch);
+    settingsCache = null;
     await rebuildPublicBoard(ctx(), settings).catch(() => undefined);
     return { ok: true, settings };
   },
@@ -682,7 +696,7 @@ export const api = {
   async createInfraction(input: CreateInfractionInput) {
     if (USE_MOCK) return mockApi.createInfraction(input);
 
-    const settings = await loadSettings(db());
+    const settings = await cachedSettings();
     const [studentSnap, typeSnap, locationSnap] = await Promise.all([
       getDocs(
         query(
@@ -818,7 +832,7 @@ export const api = {
     reason = "生教組調整",
   ) {
     if (USE_MOCK) return mockApi.rescheduleDuty(assignmentId, dutyOn);
-    const settings = await loadSettings(db());
+    const settings = await cachedSettings();
     const calendar = await loadCalendar(db(), dutyOn, addDays(dutyOn, 1));
     await rescheduleDuty(
       ctx(),
@@ -875,9 +889,32 @@ export const api = {
     return { ok: true };
   },
 
+  /**
+   * 重建搜尋索引（管理者）。
+   * 這是唯一會逐份讀 students 的地方，平時搜尋都只讀聚合索引。
+   */
+  async rebuildRosterIndex() {
+    if (USE_MOCK) return { students: 0, chunks: 0 };
+    const snap = await getDocs(collection(db(), COL.students));
+    const rows = snap.docs.map((d) => ({
+      id: d.id,
+      studentNo: (d.get("studentNo") as string) ?? "",
+      name: (d.get("name") as string) ?? "",
+      className: (d.get("className") as string) ?? "",
+      seatNo: (d.get("seatNo") as number | null) ?? null,
+      active: d.get("active") !== false,
+    }));
+    const chunks = await writeRosterIndex(ctx(), rows);
+    invalidateRosterIndex();
+    return { students: rows.length, chunks };
+  },
+
   /** 目前名冊（比對新舊名冊用；只取比對需要的欄位） */
   async rosterSnapshot(): Promise<ExistingStudent[]> {
     if (USE_MOCK) return [];
+    // 有索引就用索引（幾次讀取），沒有才退回逐份讀
+    const indexRows = await readRosterIndex({ db: db() });
+    if (indexRows) return indexRows.map((row) => ({ ...row }));
     const snap = await getDocs(collection(db(), COL.students));
     return snap.docs.map((d) => ({
       id: d.id,
@@ -931,25 +968,29 @@ export const api = {
 
   async dismissAlert(alertId: string, reason: string) {
     if (USE_MOCK) return mockApi.dismissAlert(alertId, reason);
-    const settings = await loadSettings(db());
+    const settings = await cachedSettings();
     await dismissAlert(ctx(), { alertId, reason }, settings);
     await refreshBoard();
     return { ok: true };
   },
 };
 
-/* ----------------------------- 名冊索引快取 ----------------------------- */
+/* --------------------------- 讀取次數的節流機制 --------------------------- */
+/*
+ * Firestore 免費方案每天 5 萬次讀取，逐份讀名冊或每次操作都重建看板很快就會吃光。
+ * 這裡集中三道節流：名冊索引、系統設定快取、公開看板重建間隔。
+ */
 
 const ROSTER_INDEX_KEY = "care.rosterIndex";
-/** 名冊異動頻率低，30 分鐘內沿用快取；登錄違規後會主動失效 */
-const ROSTER_INDEX_TTL = 30 * 60 * 1000;
+/** 名冊只有匯入時會變，快取 12 小時；本機匯入後會主動失效 */
+const ROSTER_INDEX_TTL = 12 * 60 * 60 * 1000;
 
 let rosterIndex: { at: number; rows: StudentIndexEntry[] } | null = null;
 
 function readCachedIndex(): { at: number; rows: StudentIndexEntry[] } | null {
   if (rosterIndex) return rosterIndex;
   try {
-    const raw = sessionStorage.getItem(ROSTER_INDEX_KEY);
+    const raw = localStorage.getItem(ROSTER_INDEX_KEY);
     if (!raw) return null;
     rosterIndex = JSON.parse(raw) as { at: number; rows: StudentIndexEntry[] };
     return rosterIndex;
@@ -958,41 +999,63 @@ function readCachedIndex(): { at: number; rows: StudentIndexEntry[] } | null {
   }
 }
 
-/** 整份名冊讀一次；重新整理頁面時沿用 sessionStorage，避免重複計費讀取 */
+/**
+ * 取得搜尋用的名冊。
+ * 優先讀聚合索引（1000 人約 2 次讀取）；尚未建立索引時才退回逐份讀 students。
+ */
 async function loadRosterIndex(): Promise<StudentIndexEntry[]> {
   const cached = readCachedIndex();
   if (cached && Date.now() - cached.at < ROSTER_INDEX_TTL) return cached.rows;
 
-  const snap = await getDocs(collection(db(), COL.students));
-  const rows: StudentIndexEntry[] = snap.docs.map((d) => ({
-    id: d.id,
-    studentNo: (d.get("studentNo") as string) ?? "",
-    name: (d.get("name") as string) ?? "",
-    className: (d.get("className") as string) ?? "",
-    seatNo: (d.get("seatNo") as number | null) ?? null,
-    active: d.get("active") !== false,
-    window: ((d.get("recidivismWindow") as Array<{ occurredOn: string }>) ?? [])
-      .map((entry) => entry.occurredOn)
-      .filter(Boolean),
-  }));
+  const indexRows = await readRosterIndex({ db: db() });
+  const rows: StudentIndexEntry[] = indexRows
+    ? indexRows.map((row) => ({ ...row, window: [] }))
+    : (await getDocs(collection(db(), COL.students))).docs.map((d) => ({
+        id: d.id,
+        studentNo: (d.get("studentNo") as string) ?? "",
+        name: (d.get("name") as string) ?? "",
+        className: (d.get("className") as string) ?? "",
+        seatNo: (d.get("seatNo") as number | null) ?? null,
+        active: d.get("active") !== false,
+        window: [],
+      }));
+
   rosterIndex = { at: Date.now(), rows };
   try {
-    sessionStorage.setItem(ROSTER_INDEX_KEY, JSON.stringify(rosterIndex));
+    localStorage.setItem(ROSTER_INDEX_KEY, JSON.stringify(rosterIndex));
   } catch {
     /* 配額不足時只用記憶體快取即可 */
   }
   return rows;
 }
 
-/** 名冊或再犯次數有異動時呼叫，下次搜尋會重新讀取 */
+/** 名冊有異動時呼叫，下次搜尋會重新讀取 */
 function invalidateRosterIndex(): void {
   rosterIndex = null;
   try {
-    sessionStorage.removeItem(ROSTER_INDEX_KEY);
+    localStorage.removeItem(ROSTER_INDEX_KEY);
   } catch {
     /* 忽略 */
   }
 }
+
+/** 系統設定幾乎不變，但幾乎每個操作都要用；快取 10 分鐘可省下大量讀取 */
+const SETTINGS_TTL = 10 * 60 * 1000;
+type CoreSettings = Awaited<ReturnType<typeof loadSettings>>;
+let settingsCache: { at: number; value: CoreSettings } | null = null;
+
+async function cachedSettings(): Promise<CoreSettings> {
+  if (settingsCache && Date.now() - settingsCache.at < SETTINGS_TTL) {
+    return settingsCache.value;
+  }
+  const value = await loadSettings(db());
+  settingsCache = { at: Date.now(), value };
+  return value;
+}
+
+/** 公開看板重建的最短間隔：連續登錄時不必每筆都重掃 14 天資料 */
+const BOARD_REBUILD_INTERVAL = 5 * 60 * 1000;
+let lastBoardRebuild = 0;
 
 /**
  * 違規類型／地點集合仍為空（畫面上顯示的是內建預設值），
@@ -1007,10 +1070,16 @@ async function materializeCatalog(): Promise<void> {
 }
 
 /** 每次異動後重建公開看板（失敗不影響主要操作） */
-async function refreshBoard(): Promise<void> {
+/**
+ * 重建公開看板。
+ * 每次重建都要掃 14 天的違規紀錄，因此設最短間隔；
+ * 看板只是給其他老師看的概況，慢幾分鐘無妨，開儀表板時會強制重建。
+ */
+async function refreshBoard(force = false): Promise<void> {
+  if (!force && Date.now() - lastBoardRebuild < BOARD_REBUILD_INTERVAL) return;
   try {
-    const settings = await loadSettings(db());
-    await rebuildPublicBoard(ctx(), settings);
+    await rebuildPublicBoard(ctx(), await cachedSettings());
+    lastBoardRebuild = Date.now();
   } catch {
     /* 看板為次要資訊，下次開啟儀表板時會重建 */
   }

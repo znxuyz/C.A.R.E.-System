@@ -67,6 +67,7 @@ export function Settings() {
   const [table, setTable] = useState<string[][] | null>(null);
   const [fileInfo, setFileInfo] = useState<string | null>(null);
   const [importMode, setImportMode] = useState<"MERGE" | "REPLACE">("MERGE");
+  const [rebuilding, setRebuilding] = useState(false);
   const [existing, setExisting] = useState<ExistingStudent[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -265,6 +266,20 @@ export function Settings() {
     setTable(null);
     setFileInfo(null);
     if (fileInput.current) fileInput.current.value = "";
+  };
+
+  const rebuildIndex = async () => {
+    setRebuilding(true);
+    try {
+      const result = await api.rebuildRosterIndex();
+      toast.push(
+        `搜尋索引已重建：${result.students} 位學生、${result.chunks} 份索引文件`,
+      );
+    } catch (error) {
+      toast.push(error instanceof Error ? error.message : "重建失敗", "error");
+    } finally {
+      setRebuilding(false);
+    }
   };
 
   const importRoster = async () => {
@@ -950,6 +965,21 @@ export function Settings() {
             </button>
             <span className="small muted">
               可重複匯入：同學號只會更新資料，既有的再犯計次不會被清掉。
+            </span>
+          </div>
+
+          <div className="btn-row">
+            <button
+              className="btn"
+              disabled={rebuilding}
+              onClick={() => void rebuildIndex()}
+            >
+              {rebuilding ? "重建中…" : "重建搜尋索引"}
+            </button>
+            <span className="small muted">
+              搜尋是讀「名冊索引」而非逐份讀學生資料，可大幅減少 Firebase
+              讀取次數。匯入名冊時會自動重建；若是在 Firebase
+              主控台直接改過學生資料，按這裡同步一次。
             </span>
           </div>
         </div>

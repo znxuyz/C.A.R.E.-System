@@ -45,6 +45,7 @@ erDiagram
 | `schoolCalendar` | `YYYY-MM-DD` | 假日與補課日（決定「隔日」） | 日期範圍 |
 | `classes` | `cls_701` | 班級（可選填導師姓名與信箱） | 直接讀取 |
 | `students` | `stu_{學號}` | 學生主檔（含座號、`active`／`leftOn`：畢業轉出後停用而不刪除） | 學號比對 |
+| `rosterIndex` | `chunk_0`… | 搜尋用的名冊聚合索引（每份 500 人），匯入名冊時重寫；取代逐份讀 `students` | 全取（1–3 次讀取） |
 | `staff` | Auth uid | **角色的真實來源**（安全規則以 get() 讀取判定） | 直接讀取 |
 | `systemState` | `dailySync` | 每日續帳的執行紀錄（取代排程函式） | 直接讀取 |
 | `accessGrants` | Google 信箱 | 以信箱預先授權的名單（只能讀自己那筆；管理者可讀全部） | 帳號管理頁 |
