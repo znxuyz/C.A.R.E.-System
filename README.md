@@ -43,7 +43,8 @@
 | [再犯偵測演算法](docs/recidivism-algorithm.md) | 15 天/3 次的語意界定、TypeScript 與 Firestore 交易實作、SQL 等價版、併發與幂等 |
 | [生教組端 UI 規劃](docs/ui-spec-discipline.md) | 使用情境、資訊架構、逐頁版面與設計決定、狀態色彩、無障礙規範 |
 | [作業流程](docs/workflow.md) | 每日流程時序圖、案件狀態、下課管制生命週期、排程作業 |
-| [部署指南](docs/deployment.md) | 本機開發、Firebase 設定、GitHub Pages 部署、上線檢查清單 |
+| [**Firebase 設定手冊**](docs/firebase-setup.md) | **第一次導入照著點即可**：建專案、開 Google 登入、部署、授權、驗收、費用與疑難排解 |
+| [部署指南](docs/deployment.md) | 本機開發、部署指令與維運（設定細節見上方手冊） |
 | [SQL 參考實作](docs/sql/recidivism.sql) | 關聯式等價版本 + [10 項自我驗證斷言](docs/sql/recidivism_test.sql)（PostgreSQL 16 驗證通過） |
 
 ## 快速開始
