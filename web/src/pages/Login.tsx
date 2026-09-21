@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { USE_MOCK, auth } from '../lib/api.ts';
-import { Callout, Field } from '../components/ui.tsx';
+import { Callout } from '../components/ui.tsx';
 import type { Session } from '../lib/types.ts';
 
-/** 登入（單一帳號：生活教育組長） */
+/** 登入（Google 帳號） */
 export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -15,7 +13,7 @@ export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }
     setBusy(true);
     setError(null);
     try {
-      onSignedIn(await auth.signIn(email, password));
+      onSignedIn(await auth.signInWithGoogle());
     } catch (err) {
       setError(err instanceof Error ? err.message : '登入失敗');
     } finally {
@@ -37,51 +35,29 @@ export function Login({ onSignedIn }: { onSignedIn: (session: Session) => void }
             </div>
           </div>
 
-          {USE_MOCK ? (
-            <>
-              <Callout>
-                目前為<strong>示範模式</strong>（不連線 Firebase，資料僅存在瀏覽器）。
-                直接按下方按鈕即可體驗完整操作。
-              </Callout>
-              <button
-                className="btn btn--primary btn--lg btn--block"
-                disabled={busy}
-                onClick={() => void signIn()}
-              >
-                {busy ? '登入中…' : '以生活教育組長身分進入'}
-              </button>
-            </>
-          ) : (
-            <form
-              className="stack"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void signIn();
-              }}
-            >
-              <Field label="校務帳號（Email）">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  autoComplete="username"
-                  required
-                  autoFocus
-                />
-              </Field>
-              <Field label="密碼">
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="current-password"
-                  required
-                />
-              </Field>
-              <button className="btn btn--primary btn--lg btn--block" disabled={busy}>
-                {busy ? '登入中…' : '登入'}
-              </button>
-            </form>
+          {USE_MOCK && (
+            <Callout>
+              目前為<strong>示範模式</strong>（不連線 Firebase，資料僅存在瀏覽器）。
+              按下按鈕即可體驗完整操作。
+            </Callout>
+          )}
+
+          <button
+            className="btn btn--primary btn--lg btn--block"
+            disabled={busy}
+            onClick={() => void signIn()}
+          >
+            <span aria-hidden="true" className="google-mark">
+              G
+            </span>
+            {busy ? '登入中…' : USE_MOCK ? '以示範帳號進入' : '使用 Google 帳號登入'}
+          </button>
+
+          {!USE_MOCK && (
+            <p className="small muted">
+              請使用學校配發的 Google 帳號登入。
+              首次登入若顯示「尚未授權」，請聯繫系統管理者指派權限。
+            </p>
           )}
 
           {error && <div className="field__error">{error}</div>}

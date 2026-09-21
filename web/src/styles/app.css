@@ -222,8 +222,8 @@ textarea { min-height: 96px; resize: vertical; line-height: 1.6; }
 }
 .check--on { border-style: solid; border-color: var(--status-warning); background: var(--status-warning-bg); }
 .check input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
-.check__label { font-weight: 500; }
-.check__desc { font-size: 12px; color: var(--ink-2); }
+.check__label { display: block; font-weight: 500; margin-bottom: 2px; }
+.check__desc { display: block; font-size: 12px; color: var(--ink-2); line-height: 1.55; }
 
 /* --------------------------------- 抽屜 -------------------------------- */
 
@@ -366,4 +366,12 @@ textarea { min-height: 96px; resize: vertical; line-height: 1.6; }
   .sidebar, .topbar, .btn, .nav { display: none !important; }
   .content { padding: 0; }
   .card { box-shadow: none; border-color: #999; }
+}
+
+/* Google 登入按鈕上的字標 */
+.google-mark {
+  display: inline-grid; place-items: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; color: #1a73e8; font-weight: 700; font-size: 13px;
+  margin-right: 2px;
 }

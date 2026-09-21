@@ -32,21 +32,34 @@ FIRESTORE_EMULATOR_HOST=localhost:8080 GCLOUD_PROJECT=care-system-dev npm run se
 ## 2. Firebase 專案設定
 
 1. **建立專案**（Firebase Console）並啟用：
-   - Authentication → 登入方式：**Email/密碼**
+   - Authentication → 登入方式：**Google**
+     （若學校使用 Google Workspace，建議一併於前端設定 `VITE_GOOGLE_HD`
+     限定只有校內網域可登入）
    - Firestore Database → 正式模式、位置 `asia-east1`
 2. **升級為 Blaze 方案**：Cloud Functions 對外呼叫需要（用量仍在免費額度內）。
 3. **（選用）Email 通知**：若要在登錄違規時寄信給導師，
    安裝 Extensions → *Trigger Email from Firestore*（集合名稱填 `mail`），
    並在 `settings/system` 把 `emailHomeroom` 設為 `true`、
    於 `classes/{id}.homeroomEmail` 填入導師信箱。
-4. **部署規則、索引與函式**：
+4. **設定管理者信箱白名單**：複製 `functions/.env.example` 為 `functions/.env`，
+   填入你自己的 Google 信箱（可多筆，逗號分隔）：
+
+```bash
+cp functions/.env.example functions/.env
+# ADMIN_EMAILS="you@example.edu.tw"
+```
+
+   這份名單決定「誰用 Google 登入後會自動取得系統管理者權限」，
+   是整個授權鏈的起點，因此只放必要的人（通常 1–2 位）。
+
+5. **部署規則、索引與函式**：
 
 ```bash
 firebase use --add                  # 選擇專案，別名 default
 npm run deploy:backend              # firestore rules + indexes + functions
 ```
 
-5. **匯入初始資料**（系統參數、違規類型、地點）：
+6. **匯入初始資料**（系統參數、違規類型、地點）：
 
 ```bash
 # 服務帳號金鑰：Console → 專案設定 → 服務帳戶 → 產生新的私密金鑰
@@ -56,18 +69,18 @@ GOOGLE_APPLICATION_CREDENTIALS=./serviceAccountKey.json npm run seed
 
 > `serviceAccountKey.json` 已列入 `.gitignore`，**切勿提交**。
 
-6. **建立生教組長帳號並指派角色**：
+7. **授權使用者**（全部在畫面上完成，不需再用指令）：
 
-```bash
-# 先在 Authentication 建立使用者（Email/密碼），取得 uid
-firebase functions:shell
-> setUserRoles({ uid: 'UID', roles: ['DISCIPLINE_STAFF', 'ADMIN'] })
-```
+   1. 你（管理者）用 **Google 登入**系統 → 信箱在 `ADMIN_EMAILS` 內，
+      系統自動指派 `ADMIN` + `DISCIPLINE_STAFF`。
+   2. 進入 **帳號管理** 頁，輸入生教組長的 Google 信箱、勾選「生活教育組長」→ 授權。
+      對方**不需要事先註冊**：授權會先存起來，待其首次以 Google 登入時自動生效。
+   3. 若要取消，於同頁按「取消授權」；系統會清除角色並讓該帳號的登入憑證立即失效。
 
-> 第一次指派時，呼叫者本身也需要 ADMIN 權限；
-> 可先用 Firebase Console 的「自訂宣告」或本機 Admin SDK 指令設定第一個管理者。
+> 若登入後看到「尚未授權」畫面，表示信箱不在 `ADMIN_EMAILS` 也沒有被授權；
+> 確認信箱無誤後按「重新檢查授權」即可。
 
-7. **匯入學生與班級名單**：
+8. **匯入學生與班級名單**：
    `students`（`studentNo`、`name`、`classId`、`className`、`seatNo`）與
    `classes`（`name`）。可用 Firebase Console 匯入，或擴充 `seed/seed.mjs`
    讀取校務系統匯出的 CSV。
@@ -93,7 +106,7 @@ firebase functions:shell
 3. 推送到預設分支即自動部署；網址為
    `https://<帳號>.github.io/C.A.R.E.-System/`
 4. 回到 Firebase Console → **Authentication → Settings → 授權網域**，
-   加入 `<帳號>.github.io`，否則登入會被拒絕。
+   加入 `<帳號>.github.io`，否則 Google 登入會被拒絕。
 
 ### 自訂網域
 
@@ -106,7 +119,10 @@ Pages 設定自訂網域後，在 workflow 環境變數加入 `VITE_BASE=/`。
 
 ## 5. 上線前檢查清單
 
-- [ ] `settings/system` 的 15 天 / 3 次 / 5 節與校規一致
+- [ ] `functions/.env` 的 `ADMIN_EMAILS` 只含必要的管理者信箱
+- [ ] 管理者可用 Google 登入並看到「帳號管理」「系統設定」兩頁
+- [ ] 生教組長已授權，且以自己的 Google 帳號登入成功
+- [ ] 於「系統設定」確認 15 天 / 3 次 / 5 節與校規一致（可直接在畫面上調整）
 - [ ] `settings/system.publicBoard.showRoster` 的設定已與學務主任確認
       （預設 `false`＝公開頁只顯示統計，不列個別學生）
 - [ ] `schoolCalendar` 已匯入本學期假日與補課日（影響「隔日解鎖」）

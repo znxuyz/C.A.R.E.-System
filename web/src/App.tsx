@@ -12,7 +12,10 @@ import { ObserverDesk } from './pages/ObserverDesk.tsx';
 import { PendingCases } from './pages/PendingCases.tsx';
 import { PublicBoard } from './pages/PublicBoard.tsx';
 import { RestrictionList } from './pages/RestrictionList.tsx';
+import { Settings } from './pages/Settings.tsx';
 import { StudentLookup } from './pages/StudentLookup.tsx';
+import { Unauthorized } from './pages/Unauthorized.tsx';
+import { Users } from './pages/Users.tsx';
 import type { Session } from './lib/types.ts';
 
 const TITLES: Array<[RegExp, string, string?]> = [
@@ -23,6 +26,8 @@ const TITLES: Array<[RegExp, string, string?]> = [
   [/^\/admin\/observers/, '安全觀察員值勤台', '一日下課 5 節・紙本檢討書回收後隔日解鎖'],
   [/^\/admin\/restrictions/, '下課管制名單', '可查任一日並列印張貼'],
   [/^\/admin\/students/, '學生查詢與違規歷程', '輔導會議與親師溝通使用'],
+  [/^\/admin\/users/, '帳號管理', '以 Google 信箱授權生教組同仁'],
+  [/^\/admin\/settings/, '系統設定', '再犯門檻、值勤節次、公開看板與通知'],
 ];
 
 function useHeading() {
@@ -51,8 +56,10 @@ function AdminLayout({
       .catch(() => undefined);
   }, []);
 
-  const items = useMemo<NavItem[]>(
-    () => [
+  const isAdmin = session.roles.includes('ADMIN');
+
+  const items = useMemo<NavItem[]>(() => {
+    const list: NavItem[] = [
       { to: '/admin', label: '儀表板', icon: '📊', group: '每日作業' },
       { to: '/admin/log', label: '登錄違規', icon: '➕', group: '每日作業' },
       { to: '/admin/cases', label: '待回收紙本', icon: '📄', badge: counts.papers, group: '每日作業' },
@@ -60,9 +67,15 @@ function AdminLayout({
       { to: '/admin/alerts', label: '再犯警示', icon: '⚠️', badge: counts.alerts, group: '追蹤輔導' },
       { to: '/admin/observers', label: '安全觀察員', icon: '👀', group: '追蹤輔導' },
       { to: '/admin/students', label: '學生查詢', icon: '🔍', group: '追蹤輔導' },
-    ],
-    [counts],
-  );
+    ];
+    if (isAdmin) {
+      list.push(
+        { to: '/admin/users', label: '帳號管理', icon: '🔑', group: '管理' },
+        { to: '/admin/settings', label: '系統設定', icon: '⚙️', group: '管理' },
+      );
+    }
+    return list;
+  }, [counts, isAdmin]);
 
   return (
     <AppShell
@@ -81,6 +94,9 @@ function AdminLayout({
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
+  const signOut = () => {
+    void auth.signOut().then(() => setSession(null));
+  };
 
   useEffect(() => {
     const unsubscribe = auth.subscribe((next) => {
@@ -111,13 +127,11 @@ export default function App() {
             element={
               !session ? (
                 <Navigate to="/login" replace />
+              ) : session.roles.length === 0 ? (
+                // 已登入但尚未被指派角色
+                <Unauthorized session={session} onSession={setSession} onSignOut={signOut} />
               ) : (
-                <AdminLayout
-                  session={session}
-                  onSignOut={() => {
-                    void auth.signOut().then(() => setSession(null));
-                  }}
-                >
+                <AdminLayout session={session} onSignOut={signOut}>
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/log" element={<InfractionLog />} />
@@ -127,6 +141,22 @@ export default function App() {
                     <Route path="/restrictions" element={<RestrictionList />} />
                     <Route path="/students" element={<StudentLookup />} />
                     <Route path="/students/:studentId" element={<StudentLookup />} />
+                    <Route
+                      path="/users"
+                      element={
+                        session.roles.includes('ADMIN') ? (
+                          <Users session={session} />
+                        ) : (
+                          <Navigate to="/admin" replace />
+                        )
+                      }
+                    />
+                    <Route
+                      path="/settings"
+                      element={
+                        session.roles.includes('ADMIN') ? <Settings /> : <Navigate to="/admin" replace />
+                      }
+                    />
                     <Route path="*" element={<Navigate to="/admin" replace />} />
                   </Routes>
                 </AdminLayout>

@@ -178,6 +178,29 @@ export interface PublicBoardData {
   }>;
 }
 
+/** 系統設定（後台可調） */
+export interface SystemSettings {
+  recidivismWindowDays: number;
+  recidivismThreshold: number;
+  observerPeriods: number;
+  observerPeriodNumbers: number[];
+  carryOverUnfinished: boolean;
+  publicBoard: { enabled: boolean; showRoster: boolean };
+  emailHomeroom: boolean;
+}
+
+/** 帳號授權清單的一列 */
+export interface AccessUser {
+  email: string;
+  uid?: string;
+  name?: string | null;
+  roles: Role[];
+  active: boolean;
+  /** 是否已用 Google 登入過（未登入者為預先授權） */
+  signedInBefore: boolean;
+  grantedAt?: string | null;
+}
+
 export interface CreateInfractionInput {
   studentNo: string;
   typeCode: string;

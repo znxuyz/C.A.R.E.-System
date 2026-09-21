@@ -10,7 +10,8 @@
  *                rescheduleObserverDuty / dismissRecidivismAlert
  *  查詢          dashboard / studentProgress
  *  排程          dailyRollForward
- *  管理          setUserRoles / updateSettings
+ *  帳號授權      claimAccess / grantAccess / revokeAccess / listAccess
+ *  系統設定      updateSettings
  */
 import { setGlobalOptions } from 'firebase-functions/v2';
 
@@ -29,4 +30,10 @@ export {
 } from './handlers/callables.js';
 
 export { dailyRollForward } from './handlers/scheduled.js';
-export { setUserRoles, updateSettings } from './handlers/admin.js';
+export {
+  claimAccess,
+  grantAccess,
+  revokeAccess,
+  listAccess,
+  updateSettings,
+} from './handlers/admin.js';

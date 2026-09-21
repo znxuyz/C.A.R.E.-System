@@ -13,6 +13,7 @@ import { CaseRuleError } from '../domain/caseRules.js';
 export interface CallerContext {
   uid: string;
   name: string;
+  email?: string;
   roles: Role[];
 }
 
@@ -27,6 +28,7 @@ export function requireStaff(request: CallableRequest): CallerContext {
   return {
     uid: auth.uid,
     name: (claims.name as string) ?? (claims.email as string) ?? auth.uid,
+    email: claims.email as string | undefined,
     roles,
   };
 }

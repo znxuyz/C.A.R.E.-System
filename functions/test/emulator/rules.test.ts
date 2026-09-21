@@ -76,6 +76,11 @@ beforeEach(async () => {
     });
     await setDoc(doc(db, 'settings/system'), { recidivismThreshold: 3 });
     await setDoc(doc(db, 'mail/mail_1'), { to: 'a@b.c' });
+    await setDoc(doc(db, 'accessGrants/teacher@example.edu.tw'), {
+      email: 'teacher@example.edu.tw',
+      roles: ['DISCIPLINE_STAFF'],
+      active: true,
+    });
     await setDoc(doc(db, 'auditLogs/log_1'), { action: 'X' });
   });
 });
@@ -147,12 +152,24 @@ describe('生活教育組長', () => {
     await assertFails(getDoc(doc(db, 'mail/mail_1')));
     await assertFails(getDoc(doc(db, 'auditLogs/log_1')));
   });
+
+  it('不可讀寫授權名單（提權關鍵資料，僅 Cloud Functions 可存取）', async () => {
+    const db = as('uid_office', STAFF);
+    await assertFails(getDoc(doc(db, 'accessGrants/teacher@example.edu.tw')));
+    await assertFails(
+      setDoc(doc(db, 'accessGrants/me@example.edu.tw'), { roles: ['ADMIN'], active: true }),
+    );
+  });
 });
 
 describe('系統管理者', () => {
   it('可讀稽核軌跡，但同樣不可直接寫入', async () => {
     const db = as('uid_admin', ADMIN);
     await assertSucceeds(getDoc(doc(db, 'auditLogs/log_1')));
+    // 連 ADMIN 也不能從前端改授權名單，只能經 grantAccess / revokeAccess
+    await assertFails(
+      setDoc(doc(db, 'accessGrants/x@example.edu.tw'), { roles: ['ADMIN'], active: true }),
+    );
     await assertFails(setDoc(doc(db, 'auditLogs/log_new'), { action: 'Y' }));
     await assertFails(updateDoc(doc(db, 'settings/system'), { recidivismThreshold: 1 }));
   });

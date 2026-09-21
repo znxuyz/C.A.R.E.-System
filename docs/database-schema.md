@@ -46,6 +46,7 @@ erDiagram
 | `classes` | `cls_701` | 班級（可選填導師姓名與信箱） | 直接讀取 |
 | `students` | `stu_701_01` | 學生主檔（含座號） | 學號比對 |
 | `staff` | Auth uid | 使用者與角色（通常 1–2 筆） | 直接讀取 |
+| `accessGrants` | Google 信箱 | 以信箱預先授權的名單（僅 Functions 可存取） | 帳號管理頁 |
 | `infractionTypes` | `RUN_IN_CORRIDOR` | 違規類型 → 對應紙本卡 | 依 `order` |
 | `locations` | `CORRIDOR_2F` | 校園地點、是否熱點 | 全取 |
 | `infractions` | auto | **違規事件（再犯計次來源）** | ★ 再犯視窗、待回收清單 |
@@ -67,6 +68,7 @@ erDiagram
   "observerPeriods": 5,            // 安全觀察員值勤節數
   "observerPeriodNumbers": [1,2,3,4,5],
   "timezone": "Asia/Taipei",
+  // 以下皆可由管理者在「系統設定」頁直接調整（updateSettings callable）
   "carryOverUnfinished": true,     // 紙本未回收時管制是否續行至隔日
   "publicBoard": {
     "enabled": true,

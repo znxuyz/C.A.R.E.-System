@@ -18,6 +18,8 @@ export const COLLECTIONS = {
   classes: 'classes',
   /** 教職員與角色（單人系統通常只有 1–2 筆） */
   staff: 'staff',
+  /** 以 Google 信箱預先授權的名單（僅 Cloud Functions 可存取） */
+  accessGrants: 'accessGrants',
   /** 違規類型設定（走廊奔跑、口出穢言…） */
   infractionTypes: 'infractionTypes',
   /** 校園地點（走廊、樓梯、川堂…） */

@@ -7,6 +7,7 @@
  */
 import { todayTaipei } from './format.ts';
 import type {
+  AccessUser,
   AlertRow,
   AssignmentRow,
   CreateInfractionInput,
@@ -16,8 +17,10 @@ import type {
   LocationOption,
   PublicBoardData,
   RestrictionRow,
+  Role,
   Session,
   StudentDetail,
+  SystemSettings,
   WatchlistRow,
 } from './types.ts';
 
@@ -39,6 +42,36 @@ export const MOCK_SESSION: Session = {
   roles: ['DISCIPLINE_STAFF', 'ADMIN'],
   email: 'discipline@example.edu.tw',
 };
+
+/** 示範模式的設定與帳號清單（存在記憶體，重新整理即重置） */
+const mockSettings: SystemSettings = {
+  recidivismWindowDays: 15,
+  recidivismThreshold: 3,
+  observerPeriods: 5,
+  observerPeriodNumbers: [1, 2, 3, 4, 5],
+  carryOverUnfinished: true,
+  publicBoard: { enabled: true, showRoster: false },
+  emailHomeroom: false,
+};
+
+const mockUsers: AccessUser[] = [
+  {
+    email: 'admin@example.edu.tw',
+    uid: 'uid_admin_01',
+    name: '資訊組（管理者）',
+    roles: ['ADMIN', 'DISCIPLINE_STAFF'],
+    active: true,
+    signedInBefore: true,
+  },
+  {
+    email: 'discipline@example.edu.tw',
+    uid: 'uid_office_01',
+    name: '王淑芬（生活教育組長）',
+    roles: ['DISCIPLINE_STAFF'],
+    active: true,
+    signedInBefore: true,
+  },
+];
 
 const TYPES: InfractionTypeOption[] = [
   { code: 'RUN_IN_CORRIDOR', name: '走廊奔跑', paperCard: 'SAFETY', paperCardLabel: '校園安全反思卡', icon: '🏃' },
@@ -579,9 +612,54 @@ export const mockApi = {
     return delay({ ok: true });
   },
 
-  setShowRoster: async (value: boolean) => {
-    store.showRoster = value;
+  settings: () => delay({ ...mockSettings }),
+
+  updateSettings: async (patch: Partial<SystemSettings>) => {
+    Object.assign(mockSettings, patch);
+    if (patch.observerPeriodNumbers) {
+      mockSettings.observerPeriods = patch.observerPeriodNumbers.length;
+    }
+    if (patch.publicBoard) {
+      mockSettings.publicBoard = { ...mockSettings.publicBoard, ...patch.publicBoard };
+      store.showRoster = mockSettings.publicBoard.showRoster;
+    }
+    return delay({ ok: true, settings: { ...mockSettings } });
+  },
+
+  listAccess: () =>
+    delay({ users: mockUsers.map((user) => ({ ...user })), bootstrapAdmins: ['admin@example.edu.tw'] }),
+
+  grantAccess: async (email: string, roles: Role[], name?: string) => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized.includes('@')) throw new Error('請輸入有效的 Google 信箱');
+    if (roles.length === 0) throw new Error('請至少指派一個角色');
+    const existing = mockUsers.find((user) => user.email === normalized);
+    if (existing) {
+      existing.roles = roles;
+      existing.active = true;
+      if (name) existing.name = name;
+    } else {
+      mockUsers.push({
+        email: normalized,
+        name: name ?? null,
+        roles,
+        active: true,
+        signedInBefore: false,
+      });
+    }
+    return delay({ ok: true, email: normalized, roles, appliedImmediately: Boolean(existing) });
+  },
+
+  revokeAccess: async (email: string) => {
+    const normalized = email.trim().toLowerCase();
+    if (normalized === 'admin@example.edu.tw') {
+      throw new Error('此信箱列於部署設定 ADMIN_EMAILS，請先自該設定移除');
+    }
+    const user = mockUsers.find((item) => item.email === normalized);
+    if (user) {
+      user.active = false;
+      user.roles = [];
+    }
     return delay({ ok: true });
   },
-  getShowRoster: () => store.showRoster,
 };

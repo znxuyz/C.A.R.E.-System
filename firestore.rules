@@ -80,6 +80,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /**
+     * 以 Google 信箱預先授權的名單。
+     * 含尚未登入者的信箱與角色，屬個資且是提權的關鍵資料，
+     * 因此對前端完全關閉，只有 Cloud Functions（Admin SDK）可讀寫。
+     */
+    match /accessGrants/{email} {
+      allow read, write: if false;
+    }
+
     /* ------------------------------ 業務資料 ------------------------------ */
 
     match /infractions/{infractionId} {

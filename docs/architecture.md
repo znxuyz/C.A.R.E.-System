@@ -47,7 +47,7 @@ flowchart TB
 | 前端 | React 18 + Vite + TypeScript | 靜態輸出即可放 GitHub Pages |
 | 路由 | HashRouter | Pages 無伺服器端 rewrite（另備 `404.html` fallback） |
 | 樣式 | 原生 CSS + 設計代幣 | 無框架依賴、載入快；深色模式為獨立色階 |
-| 身分 | Firebase Auth + custom claims | 角色寫在 token 內，安全規則可直接引用 |
+| 身分 | Firebase Auth（**Google 登入**）+ custom claims | 沿用學校 Google 帳號，免另建密碼；角色寫在 token 內，安全規則可直接引用 |
 | 資料庫 | Firestore | 免運維、即時同步、依文件計價適合校園量級 |
 | 商業邏輯 | Cloud Functions（callable） | 再犯偵測必須在**交易**中執行；認列欄位不可由前端決定 |
 | 排程 | Cloud Scheduler（`onSchedule`） | 每上課日 07:10 管制續帳與重建公開看板 |
@@ -92,8 +92,26 @@ C.A.R.E.-System/
 | 對象 | 讀取 | 寫入 |
 |---|---|---|
 | 生活教育組長 `DISCIPLINE_STAFF` | 全部業務資料 | 僅透過 callable |
-| 系統管理者 `ADMIN` | 全部 + 稽核軌跡 | 僅透過 callable |
+| 系統管理者 `ADMIN` | 全部 + 稽核軌跡 | 僅透過 callable（另可管理帳號與系統設定） |
 | 其他老師 / 任何人 | **只有** `publicBoard/today`（去識別化摘要） | 無 |
+
+### 授權鏈（Google 登入）
+
+```
+部署設定 ADMIN_EMAILS（functions/.env）
+        │  管理者以 Google 登入 → claimAccess() 自動比對
+        ▼
+    ADMIN（可進入「帳號管理」）
+        │  grantAccess({ email, roles }) → 寫入 accessGrants/{email}
+        ▼
+  生活教育組長以 Google 登入 → claimAccess() 依授權寫入 custom claims
+```
+
+* 授權可在對方登入前先建立（`accessGrants` 以信箱為鍵），對方首次登入即生效。
+* `accessGrants` 含信箱與角色，屬提權關鍵資料，**安全規則對前端完全關閉**，
+  只有 Cloud Functions 可存取。
+* 取消授權時同時 `revokeRefreshTokens()`，該帳號的既有登入立即失效。
+* `ADMIN_EMAILS` 內的信箱受保護，無法從畫面上被取消（須先改部署設定）。
 
 * 業務集合的 `create/update/delete` 在安全規則中**全部拒絕**，寫入只能經 callable，
   因此認列欄位（`consumedByAlertId`）、管制狀態、時間戳都無法由前端偽造。

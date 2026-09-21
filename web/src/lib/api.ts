@@ -8,11 +8,19 @@
  */
 import { collection, doc, getDoc, getDocs, limit as fsLimit, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut as fbSignOut } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut as fbSignOut,
+  type User,
+} from 'firebase/auth';
 import { USE_MOCK, firebase } from '../firebase/client.ts';
 import { MOCK_SESSION, mockApi } from './mock.ts';
 import { todayTaipei } from './format.ts';
 import type {
+  AccessUser,
   AlertRow,
   AssignmentRow,
   CreateInfractionInput,
@@ -25,6 +33,7 @@ import type {
   Role,
   Session,
   StudentDetail,
+  SystemSettings,
   WatchlistRow,
 } from './types.ts';
 
@@ -34,26 +43,68 @@ export { USE_MOCK };
 
 const MOCK_SESSION_KEY = 'care.session';
 
+/** 已嘗試自動領取授權的 uid（避免重複呼叫） */
+const claimAttempted = new Set<string>();
+
+async function toSession(user: User, forceRefresh = false): Promise<Session> {
+  const token = await user.getIdTokenResult(forceRefresh);
+  return {
+    uid: user.uid,
+    name: user.displayName ?? user.email ?? user.uid,
+    email: user.email ?? undefined,
+    roles: ((token.claims.roles as Role[]) ?? []) as Role[],
+  };
+}
+
+/**
+ * 尚未取得角色時，自動向後端領取授權：
+ *  - 信箱列於部署設定 ADMIN_EMAILS → 取得管理者權限
+ *  - 管理者已在「帳號管理」預先授權該信箱 → 取得對應角色
+ * 兩者皆無則維持無角色，前端顯示「尚未授權」畫面。
+ */
+async function claimIfNeeded(user: User, session: Session): Promise<Session> {
+  if (session.roles.length > 0 || claimAttempted.has(user.uid)) return session;
+  claimAttempted.add(user.uid);
+  try {
+    const result = await call<Record<string, never>, { granted: boolean }>(
+      'claimAccess',
+      {} as Record<string, never>,
+    );
+    if (!result.granted) return session;
+    return await toSession(user, true); // 重新取得含新 claims 的 token
+  } catch {
+    return session;
+  }
+}
+
 export const auth = {
-  async signIn(email: string, password: string): Promise<Session> {
+  /** Google 登入（建議使用學校 Google Workspace 帳號） */
+  async signInWithGoogle(): Promise<Session> {
     if (USE_MOCK) {
       sessionStorage.setItem(MOCK_SESSION_KEY, '1');
       return MOCK_SESSION;
     }
     const fb = firebase()!;
-    const credential = await signInWithEmailAndPassword(fb.auth, email, password);
-    const token = await credential.user.getIdTokenResult(true);
-    const roles = ((token.claims.roles as Role[]) ?? []) as Role[];
-    if (roles.length === 0) {
-      await fbSignOut(fb.auth);
-      throw new Error('此帳號尚未被指派權限，請聯繫系統管理者');
+    const provider = new GoogleAuthProvider();
+    const hd = import.meta.env.VITE_GOOGLE_HD as string | undefined;
+    provider.setCustomParameters({ prompt: 'select_account', ...(hd ? { hd } : {}) });
+
+    try {
+      const credential = await signInWithPopup(fb.auth, provider);
+      const session = await toSession(credential.user, true);
+      return await claimIfNeeded(credential.user, session);
+    } catch (error) {
+      const code = (error as { code?: string }).code ?? '';
+      // 彈出視窗被瀏覽器阻擋時改用轉導登入（回來後由 subscribe 接手）
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+        await signInWithRedirect(fb.auth, provider);
+        return new Promise<Session>(() => {});
+      }
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        throw new Error('登入已取消');
+      }
+      throw error;
     }
-    return {
-      uid: credential.user.uid,
-      name: credential.user.displayName ?? credential.user.email ?? credential.user.uid,
-      email: credential.user.email ?? undefined,
-      roles,
-    };
   },
 
   async signOut(): Promise<void> {
@@ -72,14 +123,19 @@ export const auth = {
     const fb = firebase()!;
     return onAuthStateChanged(fb.auth, async (user) => {
       if (!user) return callback(null);
-      const token = await user.getIdTokenResult();
-      callback({
-        uid: user.uid,
-        name: user.displayName ?? user.email ?? user.uid,
-        email: user.email ?? undefined,
-        roles: ((token.claims.roles as Role[]) ?? []) as Role[],
-      });
+      const session = await toSession(user);
+      callback(await claimIfNeeded(user, session));
     });
+  },
+
+  /** 手動重新檢查授權（「尚未授權」畫面的按鈕） */
+  async recheckAccess(): Promise<Session | null> {
+    if (USE_MOCK) return MOCK_SESSION;
+    const fb = firebase()!;
+    const user = fb.auth.currentUser;
+    if (!user) return null;
+    claimAttempted.delete(user.uid);
+    return claimIfNeeded(user, await toSession(user, true));
   },
 };
 
@@ -358,6 +414,58 @@ export const api = {
       alerts: alertSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AlertRow, 'id'>) })),
       restrictedToday: restrictionSnap.exists() && restrictionSnap.get('status') === 'ACTIVE',
     };
+  },
+
+  /* --- 系統設定與帳號授權 --- */
+
+  async settings(): Promise<SystemSettings> {
+    if (USE_MOCK) return mockApi.settings();
+    const fb = firebase()!;
+    const snap = await getDoc(doc(fb.db, 'settings', 'system'));
+    const data = (snap.data() ?? {}) as Partial<SystemSettings>;
+    return {
+      recidivismWindowDays: data.recidivismWindowDays ?? 15,
+      recidivismThreshold: data.recidivismThreshold ?? 3,
+      observerPeriods: data.observerPeriods ?? 5,
+      observerPeriodNumbers: data.observerPeriodNumbers ?? [1, 2, 3, 4, 5],
+      carryOverUnfinished: data.carryOverUnfinished ?? true,
+      publicBoard: {
+        enabled: data.publicBoard?.enabled ?? true,
+        showRoster: data.publicBoard?.showRoster ?? false,
+      },
+      emailHomeroom: data.emailHomeroom ?? false,
+    };
+  },
+
+  async updateSettings(patch: Partial<SystemSettings>) {
+    if (USE_MOCK) return mockApi.updateSettings(patch);
+    return call<Partial<SystemSettings>, { ok: boolean; settings: SystemSettings }>(
+      'updateSettings',
+      patch,
+    );
+  },
+
+  async listAccess(): Promise<{ users: AccessUser[]; bootstrapAdmins: string[] }> {
+    if (USE_MOCK) return mockApi.listAccess();
+    return call<Record<string, never>, { users: AccessUser[]; bootstrapAdmins: string[] }>(
+      'listAccess',
+      {} as Record<string, never>,
+    );
+  },
+
+  async grantAccess(email: string, roles: Role[], name?: string) {
+    if (USE_MOCK) return mockApi.grantAccess(email, roles, name);
+    return call<{ email: string; roles: Role[]; name?: string }, {
+      ok: boolean;
+      email: string;
+      roles: Role[];
+      appliedImmediately: boolean;
+    }>('grantAccess', { email, roles, name });
+  },
+
+  async revokeAccess(email: string) {
+    if (USE_MOCK) return mockApi.revokeAccess(email);
+    return call<{ email: string }, { ok: boolean }>('revokeAccess', { email });
   },
 
   /* --- 寫入（live 一律經 Cloud Functions） --- */
