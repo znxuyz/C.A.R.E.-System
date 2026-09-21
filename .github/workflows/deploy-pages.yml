@@ -4,8 +4,9 @@ name: Deploy web to GitHub Pages
 # Firebase Web 設定屬公開識別資訊，但仍以 Repository secrets 管理，方便切換 dev / prod 專案。
 on:
   push:
-    # main 為正式分支（線上網站的來源）；claude/** 為開發分支，保留以便預覽
-    branches: [main, 'claude/**']
+    # 僅 main 部署：兩條分支同時推送會搶同一個 pages concurrency group，
+    # 造成其中一次 deploy 被取消。開發分支要預覽請用 workflow_dispatch。
+    branches: [main]
     paths:
       - 'web/**'
       - '.github/workflows/deploy-pages.yml'
