@@ -1,19 +1,24 @@
 /** 前端檢視模型（與 functions/src/domain/types.ts 對應之精簡版） */
 
-export type Role = 'DISCIPLINE_STAFF' | 'ADMIN';
-export type InfractionStatus = 'OPEN' | 'DONE' | 'EXEMPTED' | 'VOIDED';
-export type PaperCard = 'SAFETY' | 'KIND_WORDS';
+export type Role = "DISCIPLINE_STAFF" | "ADMIN";
+export type InfractionStatus = "OPEN" | "DONE" | "EXEMPTED" | "VOIDED";
+export type PaperCard = "SAFETY" | "KIND_WORDS";
 export type RestrictionReason =
-  | 'INFRACTION_PAPER'
-  | 'OBSERVER_DUTY'
-  | 'OBSERVER_REVIEW_PENDING';
+  | "INFRACTION_PAPER"
+  | "OBSERVER_DUTY"
+  | "OBSERVER_REVIEW_PENDING";
 export type AssignmentStatus =
-  | 'SCHEDULED'
-  | 'IN_PROGRESS'
-  | 'DUTY_COMPLETED'
-  | 'CLOSED'
-  | 'CANCELLED';
-export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'ASSIGNED' | 'CLOSED' | 'DISMISSED';
+  | "SCHEDULED"
+  | "IN_PROGRESS"
+  | "DUTY_COMPLETED"
+  | "CLOSED"
+  | "CANCELLED";
+export type AlertStatus =
+  | "OPEN"
+  | "ACKNOWLEDGED"
+  | "ASSIGNED"
+  | "CLOSED"
+  | "DISMISSED";
 
 export interface Session {
   uid: string;
@@ -28,6 +33,9 @@ export interface InfractionTypeOption {
   paperCard: PaperCard;
   paperCardLabel: string;
   icon?: string;
+  /** 是否計入再犯次數（後台可調；預設計入） */
+  countsTowardRecidivism?: boolean;
+  order?: number;
 }
 
 export interface LocationOption {
@@ -46,6 +54,8 @@ export interface InfractionRow {
   typeCode: string;
   typeName: string;
   paperCard: PaperCard;
+  /** 登錄當下該類型的卡名（後台改名不影響歷史紀錄） */
+  paperCardLabel?: string;
   occurredAt: string;
   occurredOn: string;
   periodNo: number;
@@ -69,7 +79,7 @@ export interface RestrictionRow {
   seatNo?: number;
   date: string;
   reasons: RestrictionReason[];
-  status: 'ACTIVE' | 'LIFTED' | 'CANCELLED';
+  status: "ACTIVE" | "LIFTED" | "CANCELLED";
   note?: string;
 }
 
@@ -88,7 +98,11 @@ export interface AlertRow {
   status: AlertStatus;
   assignmentId?: string;
   dutyOn?: string;
-  breakdown: Array<{ infractionId: string; typeName: string; occurredOn: string }>;
+  breakdown: Array<{
+    infractionId: string;
+    typeName: string;
+    occurredOn: string;
+  }>;
 }
 
 export interface PeriodLogView {
@@ -148,7 +162,13 @@ export interface StudentDetail {
   name: string;
   className: string;
   seatNo?: number;
-  progress: { count: number; threshold: number; shortfall: number; windowStart: string; windowEnd: string };
+  progress: {
+    count: number;
+    threshold: number;
+    shortfall: number;
+    windowStart: string;
+    windowEnd: string;
+  };
   totals: { infractions: number; alerts: number; duties: number };
   history: InfractionRow[];
   alerts: AlertRow[];
@@ -169,7 +189,11 @@ export interface PublicBoardData {
   };
   trend: Array<{ date: string; safety: number; kindWords: number }>;
   hotspots: Array<{ name: string; count: number }>;
-  roster?: Array<{ className: string; seatNo: number | null; reasons: RestrictionReason[] }>;
+  roster?: Array<{
+    className: string;
+    seatNo: number | null;
+    reasons: RestrictionReason[];
+  }>;
   observers?: Array<{
     className: string;
     seatNo: number | null;

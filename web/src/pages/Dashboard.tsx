@@ -188,7 +188,7 @@ export function Dashboard() {
                       </td>
                       <td>
                         <Badge tone={PAPER_CARD_TONE[row.paperCard]}>
-                          {PAPER_CARD_LABEL[row.paperCard]}
+                          {row.paperCardLabel ?? PAPER_CARD_LABEL[row.paperCard]}
                         </Badge>
                       </td>
                       <td>{formatDate(row.occurredOn)}</td>

@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
 import { Callout, Field, Panel } from "../components/ui.tsx";
 import { useToast } from "../components/toast.tsx";
-import type { LocationOption, SystemSettings } from "../lib/types.ts";
+import type {
+  InfractionTypeOption,
+  LocationOption,
+  PaperCard,
+  SystemSettings,
+} from "../lib/types.ts";
 import { readRosterFile } from "../lib/rosterFile.ts";
 import {
   diffRoster,
@@ -12,6 +17,21 @@ import {
 } from "../core/services/roster.ts";
 
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+/** 統計分類：儀表板趨勢圖依此分色，卡名本身可自由命名 */
+const CARD_KINDS: Array<{ value: PaperCard; label: string }> = [
+  { value: "SAFETY", label: "安全類" },
+  { value: "KIND_WORDS", label: "言語類" },
+];
+
+const BLANK_TYPE = {
+  code: undefined as string | undefined,
+  name: "",
+  paperCardLabel: "",
+  paperCard: "SAFETY" as PaperCard,
+  countsTowardRecidivism: true,
+  icon: "📋",
+};
 
 /** 回溯視窗常用級距：一次點選即可，仍可手動輸入 1–365 之間的任意天數。 */
 const WINDOW_PRESETS = [
@@ -36,6 +56,9 @@ export function Settings() {
   const [seeding, setSeeding] = useState(false);
   const [roster, setRoster] = useState("");
   const [importing, setImporting] = useState(false);
+  const [types, setTypes] = useState<InfractionTypeOption[] | null>(null);
+  const [typeForm, setTypeForm] = useState<typeof BLANK_TYPE | null>(null);
+  const [savingType, setSavingType] = useState(false);
   const [locations, setLocations] = useState<LocationOption[] | null>(null);
   const [newLocation, setNewLocation] = useState("");
   const [newHotspot, setNewHotspot] = useState(false);
@@ -78,6 +101,15 @@ export function Settings() {
   }, []);
 
   useEffect(loadLocations, [loadLocations]);
+
+  const loadTypes = useCallback(() => {
+    void api
+      .infractionTypes()
+      .then((rows) => setTypes(rows))
+      .catch(() => setTypes([]));
+  }, []);
+
+  useEffect(loadTypes, [loadTypes]);
 
   const loadRoster = useCallback(() => {
     void api
@@ -123,6 +155,45 @@ export function Settings() {
       toast.push(error instanceof Error ? error.message : "建立失敗", "error");
     } finally {
       setSeeding(false);
+    }
+  };
+
+  const saveType = async () => {
+    if (!typeForm) return;
+    setSavingType(true);
+    try {
+      await api.saveInfractionType({
+        code: typeForm.code,
+        name: typeForm.name,
+        paperCardLabel: typeForm.paperCardLabel,
+        paperCard: typeForm.paperCard,
+        countsTowardRecidivism: typeForm.countsTowardRecidivism,
+        icon: typeForm.icon,
+      });
+      toast.push(`已儲存違規類型「${typeForm.name}」`);
+      setTypeForm(null);
+      loadTypes();
+    } catch (error) {
+      toast.push(error instanceof Error ? error.message : "儲存失敗", "error");
+    } finally {
+      setSavingType(false);
+    }
+  };
+
+  const deleteType = async (type: InfractionTypeOption) => {
+    if (
+      !window.confirm(
+        `確定刪除違規類型「${type.name}」？\n既有的違規紀錄已存下當時的類型與卡名，不受影響；只是之後登錄時不再出現這一類。`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.deleteInfractionType(type.code);
+      toast.push(`已刪除「${type.name}」`);
+      loadTypes();
+    } catch (error) {
+      toast.push(error instanceof Error ? error.message : "刪除失敗", "error");
     }
   };
 
@@ -448,8 +519,8 @@ export function Settings() {
       </Panel>
 
       <Panel
-        title="違規類型與地點"
-        hint={locations ? `目前 ${locations.length} 個地點` : "載入中…"}
+        title="違規類型與反思卡"
+        hint={types ? `目前 ${types.length} 類` : "載入中…"}
       >
         <div className="stack">
           <div className="btn-row">
@@ -466,6 +537,190 @@ export function Settings() {
             </span>
           </div>
 
+          <div className="field">
+            <span className="field__label">目前的違規類型</span>
+            {types === null ? (
+              <span className="muted small">載入中…</span>
+            ) : types.length === 0 ? (
+              <span className="muted small">尚未建立任何違規類型。</span>
+            ) : (
+              <div className="type-grid">
+                {types.map((type) => (
+                  <div className="type-card" key={type.code}>
+                    <span className="type-card__icon" aria-hidden="true">
+                      {type.icon ?? "📋"}
+                    </span>
+                    <span className="type-card__body">
+                      <span className="type-card__name">{type.name}</span>
+                      <span className="type-card__desc">
+                        👉 {type.paperCardLabel}
+                      </span>
+                      <span className="type-card__meta">
+                        {CARD_KINDS.find((k) => k.value === type.paperCard)
+                          ?.label ?? type.paperCard}
+                        ・
+                        {type.countsTowardRecidivism === false
+                          ? "不計入再犯"
+                          : "計入再犯"}
+                      </span>
+                    </span>
+                    <span className="type-card__actions">
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        onClick={() =>
+                          setTypeForm({
+                            code: type.code,
+                            name: type.name,
+                            paperCardLabel: type.paperCardLabel,
+                            paperCard: type.paperCard,
+                            countsTowardRecidivism:
+                              type.countsTowardRecidivism !== false,
+                            icon: type.icon ?? "📋",
+                          })
+                        }
+                      >
+                        編輯
+                      </button>
+                      <button
+                        type="button"
+                        className="tag-card__remove"
+                        aria-label={`刪除 ${type.name}`}
+                        onClick={() => void deleteType(type)}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <span className="field__hint">
+              「反思卡名稱」就是登錄後畫面提示要發給學生的那張紙本卡，可自由命名
+              （例：愛整潔反思卡）。「統計分類」只影響儀表板趨勢圖的分色。
+              既有紀錄會保留登錄當時的類型與卡名，改名或刪除都不影響歷史資料。
+            </span>
+          </div>
+
+          {typeForm ? (
+            <div className="field">
+              <span className="field__label">
+                {typeForm.code ? "編輯違規類型" : "新增違規類型"}
+              </span>
+              <div className="form-grid">
+                <Field label="圖示（可貼 emoji）">
+                  <input
+                    type="text"
+                    maxLength={2}
+                    value={typeForm.icon}
+                    onChange={(event) =>
+                      setTypeForm({ ...typeForm, icon: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="違規類型名稱" hint="例：走廊奔跑">
+                  <input
+                    type="text"
+                    maxLength={20}
+                    value={typeForm.name}
+                    onChange={(event) =>
+                      setTypeForm({ ...typeForm, name: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field
+                  label="要寫哪一張反思卡"
+                  hint="登錄後會提示發這張卡；名稱可自訂"
+                >
+                  <input
+                    type="text"
+                    maxLength={20}
+                    placeholder="例：校園安全反思卡"
+                    value={typeForm.paperCardLabel}
+                    onChange={(event) =>
+                      setTypeForm({
+                        ...typeForm,
+                        paperCardLabel: event.target.value,
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="統計分類" hint="僅影響儀表板趨勢圖的分色">
+                  <select
+                    value={typeForm.paperCard}
+                    onChange={(event) =>
+                      setTypeForm({
+                        ...typeForm,
+                        paperCard: event.target.value as PaperCard,
+                      })
+                    }
+                  >
+                    {CARD_KINDS.map((kind) => (
+                      <option key={kind.value} value={kind.value}>
+                        {kind.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+
+              <label
+                className={`check${typeForm.countsTowardRecidivism ? " check--on" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={typeForm.countsTowardRecidivism}
+                  onChange={(event) =>
+                    setTypeForm({
+                      ...typeForm,
+                      countsTowardRecidivism: event.target.checked,
+                    })
+                  }
+                />
+                <span>
+                  <span className="check__label">計入再犯次數</span>
+                  <span className="check__desc">
+                    取消勾選的類型仍會登錄並發卡，但不會累計到再犯門檻
+                    （適合勸導性質的項目）。
+                  </span>
+                </span>
+              </label>
+
+              <div className="btn-row" style={{ marginTop: 8 }}>
+                <button
+                  className="btn btn--primary"
+                  disabled={
+                    savingType ||
+                    !typeForm.name.trim() ||
+                    !typeForm.paperCardLabel.trim()
+                  }
+                  onClick={() => void saveType()}
+                >
+                  {savingType ? "儲存中…" : "儲存"}
+                </button>
+                <button className="btn" onClick={() => setTypeForm(null)}>
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="btn-row">
+              <button
+                className="btn"
+                onClick={() => setTypeForm({ ...BLANK_TYPE })}
+              >
+                ＋ 新增違規類型
+              </button>
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      <Panel
+        title="地點"
+        hint={locations ? `目前 ${locations.length} 個` : "載入中…"}
+      >
+        <div className="stack">
           <div className="field">
             <span className="field__label">目前的地點</span>
             {locations === null ? (

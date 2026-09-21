@@ -19,14 +19,18 @@ import {
   runTransaction,
   serverTimestamp,
   where,
-} from 'firebase/firestore';
-import { COL, restrictionId } from '../firestore/paths.js';
-import { addDays, nextSchoolDay, type SchoolCalendar } from '../domain/dates.js';
+} from "firebase/firestore";
+import { COL, restrictionId } from "../firestore/paths.js";
+import {
+  addDays,
+  nextSchoolDay,
+  type SchoolCalendar,
+} from "../domain/dates.js";
 import {
   assertCanAnnotate,
   assertCanReturnPaper,
   unlockDateForPaperReturn,
-} from '../domain/caseRules.js';
+} from "../domain/caseRules.js";
 import {
   ASSIGNMENT_STATUS,
   INFRACTION_STATUS,
@@ -36,13 +40,24 @@ import {
   type RecidivismWindowEntry,
   type SchoolDate,
   type SystemSettings,
-} from '../domain/types.js';
-import { auditDoc, type Ctx } from './context.js';
-import { mergeRestriction, liftRestriction, type RestrictionStudent } from './restrictions.js';
+} from "../domain/types.js";
+import { auditDoc, type Ctx } from "./context.js";
+import {
+  mergeRestriction,
+  liftRestriction,
+  type RestrictionStudent,
+} from "./restrictions.js";
 
 export interface LogInfractionInput {
   student: RestrictionStudent;
-  type: { code: string; name: string; paperCard: PaperCard; countsTowardRecidivism?: boolean };
+  type: {
+    code: string;
+    name: string;
+    paperCard: PaperCard;
+    /** 該類型要發的紙本卡名稱（後台可自訂；未設定時採卡別的預設名稱） */
+    paperCardLabel?: string;
+    countsTowardRecidivism?: boolean;
+  };
   location: { code: string; name: string };
   periodNo: number;
   occurredOn: SchoolDate;
@@ -72,6 +87,12 @@ function pruneWindow(
   return entries.filter((entry) => entry.occurredOn >= windowStart);
 }
 
+/** 自訂卡名優先；沒設定時退回卡別的預設名稱 */
+const paperCardLabel = (type: {
+  paperCard: PaperCard;
+  paperCardLabel?: string;
+}): string => type.paperCardLabel?.trim() || PAPER_CARD_LABEL[type.paperCard];
+
 export async function logInfraction(
   ctx: Ctx,
   input: LogInfractionInput,
@@ -80,7 +101,10 @@ export async function logInfraction(
 ): Promise<LogInfractionResult> {
   const { db, clock } = ctx;
   const today = clock.today();
-  const windowStart = addDays(input.occurredOn, -(settings.recidivismWindowDays - 1));
+  const windowStart = addDays(
+    input.occurredOn,
+    -(settings.recidivismWindowDays - 1),
+  );
   const dutyOn = nextSchoolDay(today, calendar);
   const counts = input.type.countsTowardRecidivism !== false;
 
@@ -107,10 +131,10 @@ export async function logInfraction(
       tx.get(paperRestrictionRef),
       tx.get(dutyRestrictionRef),
     ]);
-    if (!studentSnap.exists()) throw new Error('查無此學生');
+    if (!studentSnap.exists()) throw new Error("查無此學生");
 
     const cached = pruneWindow(
-      (studentSnap.get('recidivismWindow') as RecidivismWindowEntry[]) ?? [],
+      (studentSnap.get("recidivismWindow") as RecidivismWindowEntry[]) ?? [],
       windowStart,
     );
     const entry: RecidivismWindowEntry = {
@@ -131,6 +155,8 @@ export async function logInfraction(
       typeCode: input.type.code,
       typeName: input.type.name,
       paperCard: input.type.paperCard,
+      // 卡名一併存進事件裡：日後後台改名或刪除類型，歷史紀錄仍顯示當時的卡名
+      paperCardLabel: paperCardLabel(input.type),
       occurredAt: input.occurredAt,
       occurredOn: input.occurredOn,
       periodNo: input.periodNo,
@@ -159,7 +185,7 @@ export async function logInfraction(
         reason: RESTRICTION_REASONS.INFRACTION_PAPER,
         periods: [],
         sourceRef: { infractionId: infractionRef.id },
-        note: `${input.type.name}｜待回收${PAPER_CARD_LABEL[input.type.paperCard]}`,
+        note: `${input.type.name}｜待回收${paperCardLabel(input.type)}`,
       }),
       { merge: true },
     );
@@ -184,7 +210,7 @@ export async function logInfraction(
           infractionId: item.infractionId,
           occurredOn: item.occurredOn,
         })),
-        status: 'ASSIGNED',
+        status: "ASSIGNED",
         assignmentId: assignmentRef.id,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -207,7 +233,9 @@ export async function logInfraction(
         className: input.student.className,
         dutyOn,
         totalPeriods: settings.observerPeriods,
-        periodLogs: settings.observerPeriodNumbers.map((periodNo) => ({ periodNo })),
+        periodLogs: settings.observerPeriodNumbers.map((periodNo) => ({
+          periodNo,
+        })),
         status: ASSIGNMENT_STATUS.SCHEDULED,
         reviewReturnedAt: null,
         reviewReturnedOn: null,
@@ -238,7 +266,7 @@ export async function logInfraction(
     tx.set(
       auditRef,
       auditDoc(ctx, {
-        action: 'INFRACTION_LOGGED',
+        action: "INFRACTION_LOGGED",
         entityType: COL.infractions,
         entityId: infractionRef.id,
         after: {
@@ -252,7 +280,7 @@ export async function logInfraction(
 
     return {
       infractionId: infractionRef.id,
-      paperCardLabel: PAPER_CARD_LABEL[input.type.paperCard],
+      paperCardLabel: paperCardLabel(input.type),
       recidivism: {
         triggered,
         count: counted.length,
@@ -273,18 +301,18 @@ export async function markPaperReturned(
 ): Promise<{ unlockOn: SchoolDate }> {
   const ref = doc(ctx.db, COL.infractions, infractionId);
   const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('查無此案件');
-  assertCanReturnPaper(snap.get('status'));
+  if (!snap.exists()) throw new Error("查無此案件");
+  assertCanReturnPaper(snap.get("status"));
 
   const returnedOn = ctx.clock.today();
   const unlockOn = unlockDateForPaperReturn(returnedOn);
-  const studentId = snap.get('studentId') as string;
-  const occurredOn = snap.get('occurredOn') as SchoolDate;
+  const studentId = snap.get("studentId") as string;
+  const occurredOn = snap.get("occurredOn") as SchoolDate;
 
   await runTransaction(ctx.db, async (tx) => {
     const current = await tx.get(ref);
-    if (current.get('status') !== INFRACTION_STATUS.OPEN) {
-      throw new Error('案件狀態已變更，請重新整理');
+    if (current.get("status") !== INFRACTION_STATUS.OPEN) {
+      throw new Error("案件狀態已變更，請重新整理");
     }
     tx.update(ref, {
       status: INFRACTION_STATUS.DONE,
@@ -295,7 +323,7 @@ export async function markPaperReturned(
     tx.set(
       doc(collection(ctx.db, COL.auditLogs)),
       auditDoc(ctx, {
-        action: 'INFRACTION_PAPER_RETURNED',
+        action: "INFRACTION_PAPER_RETURNED",
         entityType: COL.infractions,
         entityId: infractionId,
         after: { returnedOn },
@@ -309,7 +337,7 @@ export async function markPaperReturned(
       studentId,
       date,
       reason: RESTRICTION_REASONS.INFRACTION_PAPER,
-      note: '紙本反思卡已回收，解除下課管制',
+      note: "紙本反思卡已回收，解除下課管制",
     });
   }
 
@@ -322,38 +350,47 @@ export async function markPaperReturned(
  */
 export async function annotateInfraction(
   ctx: Ctx,
-  params: { infractionId: string; action: 'EXEMPT' | 'VOID'; reason: string },
+  params: { infractionId: string; action: "EXEMPT" | "VOID"; reason: string },
 ): Promise<void> {
   const ref = doc(ctx.db, COL.infractions, params.infractionId);
   const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('查無此案件');
-  assertCanAnnotate(snap.get('status'), params.reason);
+  if (!snap.exists()) throw new Error("查無此案件");
+  assertCanAnnotate(snap.get("status"), params.reason);
 
-  const studentId = snap.get('studentId') as string;
-  const occurredOn = snap.get('occurredOn') as SchoolDate;
-  const isExempt = params.action === 'EXEMPT';
-  const status = isExempt ? INFRACTION_STATUS.EXEMPTED : INFRACTION_STATUS.VOIDED;
+  const studentId = snap.get("studentId") as string;
+  const occurredOn = snap.get("occurredOn") as SchoolDate;
+  const isExempt = params.action === "EXEMPT";
+  const status = isExempt
+    ? INFRACTION_STATUS.EXEMPTED
+    : INFRACTION_STATUS.VOIDED;
   const studentRef = doc(ctx.db, COL.students, studentId);
 
   await runTransaction(ctx.db, async (tx) => {
     const studentSnap = await tx.get(studentRef);
-    const cached = (studentSnap.get('recidivismWindow') as RecidivismWindowEntry[]) ?? [];
+    const cached =
+      (studentSnap.get("recidivismWindow") as RecidivismWindowEntry[]) ?? [];
 
     tx.update(ref, {
       status,
       countsTowardRecidivism: false,
-      ...(isExempt ? { exemptReason: params.reason } : { voidReason: params.reason }),
+      ...(isExempt
+        ? { exemptReason: params.reason }
+        : { voidReason: params.reason }),
       updatedAt: serverTimestamp(),
     });
     tx.set(
       studentRef,
-      { recidivismWindow: cached.filter((item) => item.infractionId !== params.infractionId) },
+      {
+        recidivismWindow: cached.filter(
+          (item) => item.infractionId !== params.infractionId,
+        ),
+      },
       { merge: true },
     );
     tx.set(
       doc(collection(ctx.db, COL.auditLogs)),
       auditDoc(ctx, {
-        action: isExempt ? 'INFRACTION_EXEMPTED' : 'INFRACTION_VOIDED',
+        action: isExempt ? "INFRACTION_EXEMPTED" : "INFRACTION_VOIDED",
         entityType: COL.infractions,
         entityId: params.infractionId,
         after: { status, reason: params.reason },
@@ -365,7 +402,7 @@ export async function annotateInfraction(
     studentId,
     date: occurredOn,
     reason: RESTRICTION_REASONS.INFRACTION_PAPER,
-    note: `${isExempt ? '免記' : '撤銷'}：${params.reason}`,
+    note: `${isExempt ? "免記" : "撤銷"}：${params.reason}`,
   });
 }
 
@@ -374,8 +411,8 @@ export async function listPendingPapers(ctx: Ctx, max = 100) {
   const snap = await getDocs(
     query(
       collection(ctx.db, COL.infractions),
-      where('status', '==', INFRACTION_STATUS.OPEN),
-      orderBy('occurredOn', 'desc'),
+      where("status", "==", INFRACTION_STATUS.OPEN),
+      orderBy("occurredOn", "desc"),
       fsLimit(max),
     ),
   );
@@ -388,11 +425,17 @@ export async function readProgress(
   studentId: string,
   settings: SystemSettings,
   asOf = ctx.clock.today(),
-): Promise<{ count: number; threshold: number; shortfall: number; windowStart: SchoolDate; windowEnd: SchoolDate }> {
+): Promise<{
+  count: number;
+  threshold: number;
+  shortfall: number;
+  windowStart: SchoolDate;
+  windowEnd: SchoolDate;
+}> {
   const snap = await getDoc(doc(ctx.db, COL.students, studentId));
   const windowStart = addDays(asOf, -(settings.recidivismWindowDays - 1));
   const count = pruneWindow(
-    (snap.get('recidivismWindow') as RecidivismWindowEntry[]) ?? [],
+    (snap.get("recidivismWindow") as RecidivismWindowEntry[]) ?? [],
     windowStart,
   ).length;
   return {

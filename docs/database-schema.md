@@ -88,7 +88,8 @@ erDiagram
   "classId": "cls_701", "className": "七年一班", "seatNo": 1,
 
   "typeCode": "RUN_IN_CORRIDOR", "typeName": "走廊奔跑",
-  "paperCard": "SAFETY",                     // SAFETY | KIND_WORDS（應發的紙本卡）
+  "paperCard": "SAFETY",                     // 統計分類：SAFETY | KIND_WORDS
+  "paperCardLabel": "校園安全反思卡",         // 登錄當下的卡名（後台改名不影響歷史）
 
   "occurredAt": "2026-09-18T02:10:00.000Z",  // 時點（UTC）
   "occurredOn": "2026-09-18",                // ★ 再犯基準日（違規發生日）

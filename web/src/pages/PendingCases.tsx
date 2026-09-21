@@ -30,7 +30,7 @@ export function PendingCases() {
   const returnPaper = async (row: InfractionRow) => {
     try {
       await api.returnPaperCard(row.id);
-      toast.push(`${row.studentName} 的${PAPER_CARD_LABEL[row.paperCard]}已回收，今日管制解除`);
+      toast.push(`${row.studentName} 的${row.paperCardLabel ?? PAPER_CARD_LABEL[row.paperCard]}已回收，今日管制解除`);
       load();
     } catch (error) {
       toast.push(error instanceof Error ? error.message : '操作失敗', 'error');
@@ -109,7 +109,7 @@ export function PendingCases() {
                     <td>{row.typeName}</td>
                     <td>
                       <Badge tone={PAPER_CARD_TONE[row.paperCard]}>
-                        {PAPER_CARD_LABEL[row.paperCard]}
+                        {row.paperCardLabel ?? PAPER_CARD_LABEL[row.paperCard]}
                       </Badge>
                     </td>
                     <td>{formatDate(row.occurredOn)}</td>

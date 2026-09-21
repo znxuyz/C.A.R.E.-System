@@ -24,20 +24,25 @@ import type {
  *  - 違規類型用大按鈕（只有兩類，且決定發哪一張紙本反思卡）
  *  - 送出後立即回饋：已凍結當日下課、應發哪張卡、目前累計次數
  */
+interface StudentHit {
+  id: string;
+  studentNo: string;
+  name: string;
+  className: string;
+  seatNo?: number;
+  windowCount?: number;
+  active?: boolean;
+}
+
 export function InfractionLog() {
   const toast = useToast();
   const [types, setTypes] = useState<InfractionTypeOption[]>([]);
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [settings, setSettings] = useState<SystemSettings | null>(null);
-  const [studentNo, setStudentNo] = useState("");
-  const [matched, setMatched] = useState<{
-    id: string;
-    name: string;
-    className: string;
-    seatNo?: number;
-    windowCount?: number;
-    active?: boolean;
-  } | null>(null);
+  // keyword 可以是學號或姓名；candidates 為比對到的候選名單
+  const [keyword, setKeyword] = useState("");
+  const [candidates, setCandidates] = useState<StudentHit[]>([]);
+  const [matched, setMatched] = useState<StudentHit | null>(null);
   const [typeCode, setTypeCode] = useState("");
   const [locationCode, setLocationCode] = useState("");
   const [periodNo, setPeriodNo] = useState(2);
@@ -69,33 +74,28 @@ export function InfractionLog() {
   }, []);
 
   useEffect(() => {
-    const keyword = studentNo.trim();
-    if (keyword.length < 3) {
+    const trimmed = keyword.trim();
+    // 中文姓氏只有一個字，打一個字就要查得到；學號則至少兩碼才開始比對
+    const minLength = /^[0-9A-Za-z]+$/.test(trimmed) ? 2 : 1;
+    if (trimmed.length < minLength) {
+      setCandidates([]);
       setMatched(null);
       return;
     }
     let cancelled = false;
-    void api.searchStudent(keyword).then((rows) => {
+    void api.searchStudent(trimmed).then((rows) => {
       if (cancelled) return;
-      const hit =
-        rows.find((row) => row.studentNo === keyword) ?? rows[0] ?? null;
-      setMatched(
-        hit
-          ? {
-              id: hit.id,
-              name: hit.name,
-              className: hit.className,
-              seatNo: hit.seatNo,
-              windowCount: hit.windowCount,
-              active: (hit as { active?: boolean }).active,
-            }
-          : null,
-      );
+      const hits = rows as StudentHit[];
+      setCandidates(hits);
+      // 只有「學號完全相同」或「唯一一筆結果」才自動帶入，
+      // 同名同姓時一律讓使用者自己點，避免登錯人
+      const exact = hits.find((row) => row.studentNo === trimmed);
+      setMatched(exact ?? (hits.length === 1 ? (hits[0] ?? null) : null));
     });
     return () => {
       cancelled = true;
     };
-  }, [studentNo]);
+  }, [keyword]);
 
   // 回溯天數可於後台調整，畫面文案一律跟著設定走（預設 15 天）
   const windowDays = settings?.recidivismWindowDays ?? 15;
@@ -109,7 +109,7 @@ export function InfractionLog() {
     setBusy(true);
     try {
       const response = await api.createInfraction({
-        studentNo: studentNo.trim(),
+        studentNo: matched.studentNo,
         typeCode,
         locationCode,
         periodNo,
@@ -125,7 +125,8 @@ export function InfractionLog() {
         dutyOn: response.recidivism.dutyOn,
       });
       toast.push(`已登錄 ${response.studentName} 的違規`);
-      setStudentNo("");
+      setKeyword("");
+      setCandidates([]);
       setTypeCode("");
       setLocationCode("");
       setNote("");
@@ -188,20 +189,25 @@ export function InfractionLog() {
         <div className="stack">
           <div className="form-grid">
             <Field
-              label="學號"
-              hint={matched ? undefined : "輸入 3 碼以上自動比對"}
+              label="學號或姓名"
+              hint={
+                matched
+                  ? undefined
+                  : candidates.length > 1
+                    ? `${candidates.length} 位相符，請點選右邊的學生`
+                    : "學號或姓名皆可，由開頭比對（學號打前幾碼、姓名打姓氏即可）"
+              }
               error={
-                studentNo.trim().length >= 3 && !matched
-                  ? "查無此學號（若尚未匯入名冊，請先到「系統設定 → 基本資料」匯入）"
+                keyword.trim() !== "" && candidates.length === 0
+                  ? "查無相符的學生（若尚未匯入名冊，請先到「系統設定 → 學生名冊」匯入）"
                   : undefined
               }
             >
               <input
                 type="text"
-                inputMode="numeric"
-                value={studentNo}
-                onChange={(event) => setStudentNo(event.target.value)}
-                placeholder="例：1140101"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="例：1140101 或 王小明"
                 autoFocus
               />
             </Field>
@@ -226,10 +232,40 @@ export function InfractionLog() {
                         </Badge>
                       )}
                   </>
+                ) : candidates.length > 0 ? (
+                  <div className="hit-list">
+                    {candidates.map((hit) => (
+                      <button
+                        key={hit.id}
+                        type="button"
+                        className="btn btn--sm"
+                        onClick={() => setMatched(hit)}
+                      >
+                        {hit.className} {hit.seatNo ? `${hit.seatNo} 號 ` : ""}
+                        {hit.name}
+                        <span className="muted">（{hit.studentNo}）</span>
+                        {hit.active === false && "・已離校"}
+                      </button>
+                    ))}
+                  </div>
                 ) : (
                   <span className="muted small">待比對</span>
                 )}
               </div>
+              {matched && (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  style={{ marginTop: 6 }}
+                  onClick={() => {
+                    setMatched(null);
+                    setKeyword("");
+                    setCandidates([]);
+                  }}
+                >
+                  換一位
+                </button>
+              )}
             </Field>
           </div>
 

@@ -23,6 +23,7 @@ import {
   DEFAULT_LOCATIONS,
 } from "../domain/defaults.js";
 import { auditDoc, type Ctx } from "./context.js";
+import type { PaperCard } from "../domain/types.js";
 
 /** Firestore 單次批次上限 500 筆；留一點餘裕 */
 const BATCH_LIMIT = 400;
@@ -415,6 +416,87 @@ export async function removeLocation(ctx: Ctx, code: string): Promise<void> {
     auditDoc(ctx, {
       action: "DELETE_LOCATION",
       entityType: "location",
+      entityId: code,
+    }),
+  );
+}
+
+/* ------------------------- 違規類型維護（管理者） ------------------------- */
+
+export const infractionTypeDocId = (name: string): string =>
+  `type_${safeId(name)}`;
+
+export interface InfractionTypeInput {
+  /** 既有類型才有；新增時由名稱推得 */
+  code?: string;
+  name: string;
+  /** 紙本卡名稱，可自訂（例：校園安全反思卡、愛整潔反思卡） */
+  paperCardLabel: string;
+  /** 統計分類：儀表板趨勢圖以此分色 */
+  paperCard: PaperCard;
+  /** 是否計入再犯次數（勸導性質的類型可關掉） */
+  countsTowardRecidivism: boolean;
+  icon?: string;
+  order?: number;
+}
+
+/**
+ * 新增或更新違規類型。
+ *
+ * 既有的違規事件已存下當時的 `typeName` 與 `paperCardLabel`，
+ * 因此改名或改卡名都不會動到歷史紀錄。
+ */
+export async function upsertInfractionType(
+  ctx: Ctx,
+  input: InfractionTypeInput,
+): Promise<{ code: string }> {
+  const name = input.name.trim();
+  const label = input.paperCardLabel.trim();
+  if (!name) throw new Error("請輸入違規類型名稱");
+  if (!label) throw new Error("請輸入反思卡名稱");
+  if (name.length > 20) throw new Error("類型名稱請控制在 20 字以內");
+  if (label.length > 20) throw new Error("反思卡名稱請控制在 20 字以內");
+
+  const code = input.code ?? infractionTypeDocId(name);
+  await setDoc(
+    doc(ctx.db, COL.infractionTypes, code),
+    {
+      name,
+      paperCardLabel: label,
+      paperCard: input.paperCard,
+      countsTowardRecidivism: input.countsTowardRecidivism,
+      icon: input.icon?.trim() || "📋",
+      order: input.order ?? 99,
+    },
+    { merge: true },
+  );
+
+  await addDoc(
+    collection(ctx.db, COL.auditLogs),
+    auditDoc(ctx, {
+      action: input.code ? "UPDATE_INFRACTION_TYPE" : "CREATE_INFRACTION_TYPE",
+      entityType: "infractionType",
+      entityId: code,
+      after: { name, paperCardLabel: label, paperCard: input.paperCard },
+    }),
+  );
+  return { code };
+}
+
+/**
+ * 刪除違規類型。
+ * 既有違規事件不受影響（已存下當時的類型與卡名），只是之後不再能選這一類。
+ */
+export async function removeInfractionType(
+  ctx: Ctx,
+  code: string,
+): Promise<void> {
+  await deleteDoc(doc(ctx.db, COL.infractionTypes, code));
+  await addDoc(
+    collection(ctx.db, COL.auditLogs),
+    auditDoc(ctx, {
+      action: "DELETE_INFRACTION_TYPE",
+      entityType: "infractionType",
       entityId: code,
     }),
   );

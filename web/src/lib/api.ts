@@ -70,9 +70,12 @@ import {
 import {
   importStudents,
   parseRosterRows,
+  removeInfractionType,
   removeLocation,
   seedBaseData,
+  upsertInfractionType,
   upsertLocation,
+  type InfractionTypeInput,
   type ExistingStudent,
 } from "../core/services/roster.ts";
 import type {
@@ -226,6 +229,7 @@ const mapInfraction = (id: string, data: DocumentData): InfractionRow => ({
   typeCode: data.typeCode as string,
   typeName: (data.typeName as string) ?? "",
   paperCard: data.paperCard as InfractionRow["paperCard"],
+  paperCardLabel: (data.paperCardLabel as string | undefined) ?? undefined,
   occurredAt: toIso(data.occurredAt) ?? (data.occurredAt as string) ?? "",
   occurredOn: data.occurredOn as string,
   periodNo: (data.periodNo as number) ?? 0,
@@ -332,6 +336,8 @@ export const api = {
         paperCard: type.paperCard,
         paperCardLabel: type.paperCardLabel,
         icon: type.icon,
+        countsTowardRecidivism: type.countsTowardRecidivism,
+        order: type.order,
       }));
     }
     return snap.docs.map((d) => ({
@@ -340,6 +346,8 @@ export const api = {
       paperCard: d.get("paperCard") as InfractionTypeOption["paperCard"],
       paperCardLabel: (d.get("paperCardLabel") as string) ?? "",
       icon: d.get("icon") as string | undefined,
+      countsTowardRecidivism: d.get("countsTowardRecidivism") !== false,
+      order: (d.get("order") as number | undefined) ?? 99,
     }));
   },
 
@@ -497,32 +505,62 @@ export const api = {
     );
   },
 
+  /**
+   * 以**學號或姓名**搜尋學生。
+   *
+   * Firestore 沒有全文檢索，但可用範圍查詢做「前綴比對」：
+   * `>= kw` 且 `<= kw + \uf8ff` 等同「以 kw 開頭」。
+   * 因此學號打前幾碼、姓氏打一個字都找得到，兩邊各查一次再合併去重。
+   */
   async searchStudent(keyword: string) {
     if (USE_MOCK) return mockApi.searchStudent(keyword);
     const trimmed = keyword.trim();
-    const snap = await getDocs(
-      query(
-        collection(db(), COL.students),
-        where("studentNo", "==", trimmed),
-        fsLimit(5),
-      ),
-    );
-    const settings = await loadSettings(db());
+    if (!trimmed) return [];
+    const end = `${trimmed}\uf8ff`;
+    const byField = (field: "studentNo" | "name") =>
+      getDocs(
+        query(
+          collection(db(), COL.students),
+          where(field, ">=", trimmed),
+          where(field, "<=", end),
+          fsLimit(8),
+        ),
+      );
+
+    const [byNo, byName, settings] = await Promise.all([
+      byField("studentNo"),
+      byField("name"),
+      loadSettings(db()),
+    ]);
     const windowStart = addDays(
       todayTaipei(),
       -(settings.recidivismWindowDays - 1),
     );
-    return snap.docs.map((d) => ({
-      id: d.id,
-      studentNo: d.get("studentNo") as string,
-      name: d.get("name") as string,
-      className: d.get("className") as string,
-      seatNo: d.get("seatNo") as number | undefined,
-      active: d.get("active") !== false,
-      windowCount: (
-        (d.get("recidivismWindow") as Array<{ occurredOn: string }>) ?? []
-      ).filter((entry) => entry.occurredOn >= windowStart).length,
-    }));
+
+    const seen = new Set<string>();
+    return (
+      [...byNo.docs, ...byName.docs]
+        .filter((d) => (seen.has(d.id) ? false : seen.add(d.id) !== undefined))
+        .map((d) => ({
+          id: d.id,
+          studentNo: d.get("studentNo") as string,
+          name: d.get("name") as string,
+          className: d.get("className") as string,
+          seatNo: d.get("seatNo") as number | undefined,
+          active: d.get("active") !== false,
+          windowCount: (
+            (d.get("recidivismWindow") as Array<{ occurredOn: string }>) ?? []
+          ).filter((entry) => entry.occurredOn >= windowStart).length,
+        }))
+        // 在校生排前面，其次依班級、座號
+        .sort(
+          (x, y) =>
+            Number(y.active) - Number(x.active) ||
+            x.className.localeCompare(y.className, "zh-Hant") ||
+            (x.seatNo ?? 0) - (y.seatNo ?? 0),
+        )
+        .slice(0, 8)
+    );
   },
 
   async student(studentId: string): Promise<StudentDetail> {
@@ -670,6 +708,9 @@ export const api = {
               code: typeSnap.id,
               name: typeSnap.get("name") as string,
               paperCard: typeSnap.get("paperCard") as "SAFETY" | "KIND_WORDS",
+              paperCardLabel: typeSnap.get("paperCardLabel") as
+                | string
+                | undefined,
               countsTowardRecidivism:
                 typeSnap.get("countsTowardRecidivism") !== false,
             }
@@ -677,6 +718,7 @@ export const api = {
               code: fallbackType!.code,
               name: fallbackType!.name,
               paperCard: fallbackType!.paperCard,
+              paperCardLabel: fallbackType!.paperCardLabel,
               countsTowardRecidivism: fallbackType!.countsTowardRecidivism,
             },
         location: {
@@ -776,6 +818,20 @@ export const api = {
     return seedBaseData(ctx());
   },
 
+  /** 違規類型維護（管理者）：名稱、要發哪張反思卡、是否計入再犯都可改 */
+  async saveInfractionType(input: InfractionTypeInput) {
+    if (USE_MOCK) return { code: input.code ?? `type_${input.name}` };
+    await materializeCatalog();
+    return upsertInfractionType(ctx(), input);
+  },
+
+  async deleteInfractionType(code: string) {
+    if (USE_MOCK) return { ok: true };
+    await materializeCatalog();
+    await removeInfractionType(ctx(), code);
+    return { ok: true };
+  },
+
   /**
    * 地點維護：集合為空時代表仍在用內建預設值，
    * 第一次異動前先把預設值寫進 Firestore，否則刪掉一個之後預設值又會整組冒出來。
@@ -786,13 +842,13 @@ export const api = {
     code?: string;
   }) {
     if (USE_MOCK) return { code: input.code ?? `loc_${input.name}`, ...input };
-    await materializeLocations();
+    await materializeCatalog();
     return upsertLocation(ctx(), input);
   },
 
   async deleteLocation(code: string) {
     if (USE_MOCK) return { ok: true };
-    await materializeLocations();
+    await materializeCatalog();
     await removeLocation(ctx(), code);
     return { ok: true };
   },
@@ -859,10 +915,16 @@ export const api = {
   },
 };
 
-/** 地點集合仍為空（使用內建預設值）時，先寫入預設值再讓使用者增刪 */
-async function materializeLocations(): Promise<void> {
-  const snap = await getDocs(collection(db(), COL.locations));
-  if (snap.empty) await seedBaseData(ctx());
+/**
+ * 違規類型／地點集合仍為空（畫面上顯示的是內建預設值）時，
+ * 先把預設值寫進 Firestore 再讓使用者增刪，否則刪掉一筆之後預設值又會整組冒出來。
+ */
+async function materializeCatalog(): Promise<void> {
+  const [types, locations] = await Promise.all([
+    getDocs(collection(db(), COL.infractionTypes)),
+    getDocs(collection(db(), COL.locations)),
+  ]);
+  if (types.empty || locations.empty) await seedBaseData(ctx());
 }
 
 /** 每次異動後重建公開看板（失敗不影響主要操作） */
