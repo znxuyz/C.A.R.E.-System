@@ -275,7 +275,7 @@ export function Settings() {
           <div className="form-grid">
             <Field
               label="回溯天數（含當天）"
-              hint="1–365 天。預設 15 天；可設為一學期或一學年"
+              hint="往前算幾天。填 15 代表「今天＋前 14 天」這段期間內的違規才會被計入。1–365 天，預設 15 天。"
             >
               <input
                 type="number"
@@ -303,7 +303,10 @@ export function Settings() {
                 ))}
               </div>
             </Field>
-            <Field label="觸發次數" hint="1–20 次。預設 3 次">
+            <Field
+              label="觸發次數"
+              hint="同一位學生在上述期間內累計到第幾次違規，就發出再犯警示。填 3 代表第 3 次時觸發。1–20 次，預設 3 次。"
+            >
               <input
                 type="number"
                 min={1}
@@ -315,6 +318,22 @@ export function Settings() {
               />
             </Field>
           </div>
+          <Callout tone="warning">
+            <span aria-hidden="true">📐</span>
+            <span>
+              目前規則：同一位學生在{" "}
+              <strong>{form.recidivismWindowDays} 天內（含當天）</strong>累計到{" "}
+              <strong>第 {form.recidivismThreshold} 次</strong>
+              違規時，系統會發出再犯警示，並自動把他排入
+              <strong>安全觀察員追蹤清單</strong>（值勤一日下課{" "}
+              {form.observerPeriods} 節）。
+              <br />
+              計入的是<strong>違規登錄的筆數</strong>
+              （走廊奔跑與口出穢言合併計算）；已被某次警示認列的違規會標記為
+              「已認列」，不會對下一波處分重複計數。
+            </span>
+          </Callout>
+
           <Callout>
             <span aria-hidden="true">ℹ️</span>
             <span>
