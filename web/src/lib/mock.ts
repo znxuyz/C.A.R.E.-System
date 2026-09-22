@@ -154,6 +154,8 @@ const STUDENTS: MockStudent[] = [
 interface MockInfraction extends InfractionRow {
   countsTowardRecidivism: boolean;
   consumedByAlertId: string | null;
+  /** 是否發了紙本反思卡（期間內第一次只記錄勸導 → false） */
+  cardIssued: boolean;
 }
 
 class MockStore {
@@ -237,6 +239,7 @@ class MockStore {
       recordedBy: { uid: "uid_office_01", name: "王淑芬" },
       countsTowardRecidivism: true,
       consumedByAlertId: null,
+      cardIssued: true,
     });
 
     if (status === "OPEN") {
@@ -584,6 +587,52 @@ export const mockApi = {
     ),
 
   /** 比對規則與正式環境一致（見 core/domain/studentSearch.ts）：學號／姓名／班級 */
+  firstOffenders: () => {
+    const windowStart = shift(store.today, -(WINDOW_DAYS - 1));
+    const byStudent = new Map<string, MockInfraction[]>();
+    for (const item of store.infractions) {
+      if (item.occurredOn < windowStart) continue;
+      if (item.status === "VOIDED" || item.status === "EXEMPTED") continue;
+      if (!item.countsTowardRecidivism || item.consumedByAlertId) continue;
+      byStudent.set(item.studentId, [
+        ...(byStudent.get(item.studentId) ?? []),
+        item,
+      ]);
+    }
+    return delay(
+      [...byStudent.values()]
+        .filter((items) => items.length === 1)
+        .map((items) => {
+          const item = items[0]!;
+          const expiresOn = shift(item.occurredOn, WINDOW_DAYS - 1);
+          return {
+            studentId: item.studentId,
+            studentNo: item.studentNo,
+            studentName: item.studentName,
+            className: item.className,
+            ...(item.seatNo === undefined ? {} : { seatNo: item.seatNo }),
+            infractionId: item.id,
+            occurredOn: item.occurredOn,
+            typeName: item.typeName,
+            locationName: item.locationName,
+            periodNo: item.periodNo,
+            cardIssued: item.cardIssued,
+            expiresOn,
+            daysLeft: Math.max(
+              0,
+              Math.round(
+                (Date.parse(`${expiresOn}T00:00:00Z`) -
+                  Date.parse(`${store.today}T00:00:00Z`)) /
+                  86400000,
+              ),
+            ),
+            ...(item.note ? { note: item.note } : {}),
+          };
+        })
+        .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn)),
+    );
+  },
+
   searchStudent: (keyword: string) => {
     const q = keyword.trim();
     if (!q) return delay([]);
@@ -655,6 +704,12 @@ export const mockApi = {
     );
     const target = store.infractions.find((i) => i.id === id)!;
     target.note = input.note;
+    target.cardIssued = cardIssued;
+    if (!cardIssued) {
+      // 沒發卡就沒有待回收的紙本
+      target.paperReturnedOn = undefined;
+      target.paperCardLabel = undefined;
+    }
     const alert = store.evaluate(student.id, store.today);
     return delay({
       infractionId: id,

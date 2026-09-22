@@ -66,7 +66,7 @@ import {
 import { rebuildPublicBoard } from "../core/services/publicBoard.ts";
 import { listRestrictionsOn } from "../core/services/restrictions.ts";
 import { loadSettings, updateSettings } from "../core/services/settings.ts";
-import { addDays } from "../core/domain/dates.ts";
+import { addDays, diffDays } from "../core/domain/dates.ts";
 import {
   matchStudents,
   type StudentIndexEntry,
@@ -103,6 +103,7 @@ import type {
   PublicBoardData,
   RestrictionRow,
   Role,
+  FirstOffenderRow,
   Session,
   StudentDetail,
   SystemSettings,
@@ -590,6 +591,71 @@ export const api = {
         active: s.active,
         windowCount: s.window.filter((day) => day >= windowStart).length,
       }));
+  },
+
+  /**
+   * 初犯名單：回溯期間內只有 1 筆、且尚未被警示認列的學生。
+   * 依預設政策這一次只做記錄勸導，因此這份清單是「還來得及在處分前介入」的對象。
+   */
+  async firstOffenders(): Promise<FirstOffenderRow[]> {
+    if (USE_MOCK) return mockApi.firstOffenders();
+    const settings = await cachedSettings();
+    const today = todayTaipei();
+    const windowStart = addDays(today, -(settings.recidivismWindowDays - 1));
+
+    const snap = await getDocs(
+      query(
+        collection(db(), COL.infractions),
+        where("occurredOn", ">=", windowStart),
+        where("occurredOn", "<=", today),
+        fsLimit(1000),
+      ),
+    );
+
+    // 只算計入再犯、且尚未被任何警示認列的紀錄
+    const byStudent = new Map<string, DocumentData[]>();
+    for (const d of snap.docs) {
+      const status = d.get("status");
+      if (status === "VOIDED" || status === "EXEMPTED") continue;
+      if (d.get("countsTowardRecidivism") === false) continue;
+      if (d.get("consumedByAlertId")) continue;
+      const studentId = d.get("studentId") as string;
+      byStudent.set(studentId, [...(byStudent.get(studentId) ?? []), d]);
+    }
+
+    return [...byStudent.values()]
+      .filter((docs) => docs.length === 1)
+      .map((docs) => {
+        const d = docs[0]!;
+        const occurredOn = d.get("occurredOn") as string;
+        const expiresOn = addDays(
+          occurredOn,
+          settings.recidivismWindowDays - 1,
+        );
+        return {
+          studentId: d.get("studentId") as string,
+          studentNo: (d.get("studentNo") as string) ?? "",
+          studentName: (d.get("studentName") as string) ?? "",
+          className: (d.get("className") as string) ?? "",
+          ...(typeof d.get("seatNo") === "number"
+            ? { seatNo: d.get("seatNo") as number }
+            : {}),
+          infractionId: d.id,
+          occurredOn,
+          typeName: (d.get("typeName") as string) ?? "",
+          locationName: (d.get("locationName") as string) ?? "",
+          periodNo: (d.get("periodNo") as number) ?? 0,
+          cardIssued: d.get("cardIssued") !== false,
+          expiresOn,
+          daysLeft: Math.max(0, diffDays(expiresOn, today)),
+          ...(d.get("note") ? { note: d.get("note") as string } : {}),
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.occurredOn.localeCompare(a.occurredOn) ||
+          a.className.localeCompare(b.className, "zh-Hant"),
+      );
   },
 
   /**

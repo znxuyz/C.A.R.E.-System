@@ -137,6 +137,29 @@ export interface WatchlistRow {
   shortfall: number;
 }
 
+/**
+ * 初犯名單的一列。
+ * 「初犯」＝回溯期間內只有 1 筆、且尚未被任何警示認列的學生；
+ * 依預設政策這一次只做記錄勸導（未發反思卡），是輔導前置的關注對象。
+ */
+export interface FirstOffenderRow {
+  studentId: string;
+  studentNo: string;
+  studentName: string;
+  className: string;
+  seatNo?: number;
+  infractionId: string;
+  occurredOn: string;
+  typeName: string;
+  locationName: string;
+  periodNo: number;
+  cardIssued: boolean;
+  /** 這筆違規退出回溯期間的日期（之後該生就不在名單上） */
+  expiresOn: string;
+  daysLeft: number;
+  note?: string;
+}
+
 export interface DashboardData {
   today: string;
   kpis: {
