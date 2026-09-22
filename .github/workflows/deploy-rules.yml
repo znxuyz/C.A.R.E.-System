@@ -1,0 +1,63 @@
+name: Deploy Firestore rules
+
+# 規則與程式碼必須同步：程式新增了集合，規則沒跟上就會出現
+# 「Missing or insufficient permissions」。因此 firestore.rules 一有變動就自動發布，
+# 不必再到 Firebase 主控台手動貼上。
+#
+# 需要一次性設定：
+#   1. Firebase 主控台 → ⚙️ 專案設定 → 服務帳戶 → 產生新的私密金鑰（下載 JSON）
+#   2. GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+#      名稱：FIREBASE_SERVICE_ACCOUNT  內容：整份 JSON
+# 未設定時本流程會略過（不會讓 CI 變紅），改由 npm run deploy:rules 手動發布。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - '.firebaserc'
+      - '.github/workflows/deploy-rules.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: 發布安全規則與索引
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 確認是否已設定服務帳戶
+        id: guard
+        env:
+          KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=尚未自動發布::未設定 FIREBASE_SERVICE_ACCOUNT，已略過。請手動執行 npm run deploy:rules，或依 docs/firebase-setup.md 設定該 secret。"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.configured == 'true'
+        with:
+          node-version: '20'
+
+      - name: 寫入服務帳戶金鑰
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$KEY" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: 發布 firestore.rules 與索引
+        if: steps.guard.outputs.configured == 'true'
+        run: npx --yes firebase-tools@latest deploy --only firestore:rules,firestore:indexes --non-interactive
+
+      - name: 清除金鑰
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

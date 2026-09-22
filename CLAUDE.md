@@ -9,6 +9,17 @@
 - 完成的變更**直接 commit 並 push 到 `main`**，不需另開分支或 PR，也不需等待使用者手動推送。
 - 推送前一律先確認：型別檢查、單元測試、規則測試、建置全數通過。
 
+## 安全規則的發布
+
+- 程式新增集合時，`firestore.rules` 必須同步更新，否則線上會出現
+  「Missing or insufficient permissions」。
+- 規則推上 `main` 後由 `.github/workflows/deploy-rules.yml` 自動發布
+  （需 repo secret `FIREBASE_SERVICE_ACCOUNT`）；未設定時該流程略過，
+  需改用 `npm run deploy:rules` 或在 Console 貼上。
+- 每次改規則都要跑 `npm run test:rules`（Firestore 模擬器）。
+- 發布規則不會刪除資料；權限錯誤代表「寫入被拒絕」或「讀取被拒絕」，
+  面向使用者的訊息必須講清楚這一點（見 `web/src/lib/errors.ts`）。
+
 ## 架構紅線
 
 - **不使用 Cloud Functions、不升級 Blaze 方案。** 所有業務邏輯在前端執行，

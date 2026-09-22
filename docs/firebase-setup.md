@@ -59,7 +59,12 @@
 ## 2. 設定安全規則與索引（約 5 分鐘）
 
 這一步是把「誰能讀寫什麼」的規則送上 Firebase。
-**兩種做法擇一**：不想裝任何東西就用方式 A，全程在網頁上完成。
+**三種做法擇一**：想一次設定好、以後都不用再管，用方式 C（建議）；
+不想裝任何東西就用方式 A，全程在網頁上完成。
+
+> **重要觀念**：規則只管「誰能讀寫」，**發布規則不會刪除任何資料**。
+> 如果某個功能出現「Missing or insufficient permissions」，那是寫入被**拒絕**
+> （資料從未存進去）或讀取被拒絕（資料仍在雲端、只是看不到），不是資料被刪。
 
 ### 方式 A：在 Console 貼上（不需終端機、不需安裝）
 
@@ -100,6 +105,25 @@ npm run deploy:rules           # 規則 + 6 筆索引一次送上
 
 > 專案 ID 已寫在 `.firebaserc`，不需要再跑 `firebase use --add`。
 
+### 方式 C：交給 GitHub Actions 自動發布（設定一次，以後都不用管）
+
+程式碼新增集合時規則要跟著更新，忘了更新就會出現
+「Missing or insufficient permissions」。把發布權交給 CI 就不會再脫鉤：
+
+1. Console → ⚙️ **專案設定 → 服務帳戶 → 產生新的私密金鑰**，下載 JSON
+2. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
+   - Name：`FIREBASE_SERVICE_ACCOUNT`
+   - Secret：**整份 JSON 內容**（連大括號一起貼）
+3. 完成。之後只要 `firestore.rules` 或 `firestore.indexes.json` 有變動並推上
+   `main`，[`deploy-rules.yml`](../.github/workflows/deploy-rules.yml)
+   就會自動發布規則與索引；也可以在 Actions 分頁手動執行（workflow_dispatch）。
+
+> 未設定這個 secret 時流程會自動略過並留一則警告，CI 不會變紅 ——
+> 但就要自己記得用方式 A 或 B 發布。
+>
+> 這把金鑰等同專案的管理權限，只放在 GitHub Secrets（不會出現在程式碼或紀錄裡）。
+> 若外洩，回到「服務帳戶」頁面刪除該金鑰即可失效。
+
 ### 確認結果
 
 Console → Firestore Database → **索引** 分頁，6 筆索引狀態都變成
@@ -108,7 +132,7 @@ Console → Firestore Database → **索引** 分頁，6 筆索引狀態都變�
 > **為什麼一定要做這一步**：Firestore 建立時若選「測試模式」，
 > 會套用一份 30 天後失效的全開放規則 —— 那段期間**任何人**都能讀寫你的資料庫，
 > 到期後則全部拒絕、系統直接不能用。本專案的規則才是真正的防線
-> （27 項自動化測試涵蓋提權、竄改時間戳、刪除紀錄等情境）。
+> （28 項自動化測試涵蓋提權、竄改時間戳、刪除紀錄等情境）。
 
 ## 3. 部署前端到 GitHub Pages（約 5 分鐘）
 
@@ -329,6 +353,12 @@ npm run seed
 ---
 
 ## 9. 疑難排解
+
+| 症狀 | 原因與處理 |
+|---|---|
+| 匯入名冊時跳「Missing or insufficient permissions」 | 主控台的規則是舊版（缺新集合的段落）。重新發布 `firestore.rules`（方式 A／B／C 任一）後，到「系統設定 → 學生名冊 → 重建搜尋索引」。**資料不會因此消失**：被拒絕的寫入從未存入，既有資料也不受影響。 |
+| 某台裝置看到的名冊人數和別台不同 | 本機快取尚未更新。按「系統設定 → 清除本機快取並重新載入」。 |
+| 不確定是規則問題還是帳號權限問題 | 按「系統設定 → 檢查權限」，會逐項列出 staff／students／rosterIndex／settings 的讀寫結果與目前角色。 |
 
 | 症狀 | 原因與解法 |
 |---|---|
