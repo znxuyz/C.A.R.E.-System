@@ -206,6 +206,8 @@ export interface PublicBoardData {
 export interface SystemSettings {
   recidivismWindowDays: number;
   recidivismThreshold: number;
+  /** 期間內第幾次起才發紙本反思卡（1 = 每次都發） */
+  cardFromOffense: number;
   observerPeriods: number;
   observerPeriodNumbers: number[];
   carryOverUnfinished: boolean;

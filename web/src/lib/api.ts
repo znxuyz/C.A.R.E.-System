@@ -787,6 +787,8 @@ export const api = {
       studentName: studentDoc.get("name") as string,
       className: studentDoc.get("className") as string,
       paperCardLabel: result.paperCardLabel,
+      cardIssued: result.cardIssued,
+      offenseIndex: result.offenseIndex,
       recidivism: result.recidivism,
     };
   },

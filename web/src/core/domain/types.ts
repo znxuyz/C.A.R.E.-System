@@ -27,9 +27,9 @@ export type IsoTimestamp = string;
 
 export const ROLES = {
   /** 生活教育組長（唯一具備寫入權限的身分） */
-  DISCIPLINE_STAFF: 'DISCIPLINE_STAFF',
+  DISCIPLINE_STAFF: "DISCIPLINE_STAFF",
   /** 系統管理者（設定與帳號維護） */
-  ADMIN: 'ADMIN',
+  ADMIN: "ADMIN",
 } as const;
 export type Role = (typeof ROLES)[keyof typeof ROLES];
 
@@ -39,24 +39,24 @@ export type Role = (typeof ROLES)[keyof typeof ROLES];
 
 export const BUILTIN_INFRACTION_TYPES = {
   /** 走廊奔跑 → 校園安全反思卡 */
-  RUN_IN_CORRIDOR: 'RUN_IN_CORRIDOR',
+  RUN_IN_CORRIDOR: "RUN_IN_CORRIDOR",
   /** 口出穢言 → 口說好話反思卡 */
-  FOUL_LANGUAGE: 'FOUL_LANGUAGE',
+  FOUL_LANGUAGE: "FOUL_LANGUAGE",
 } as const;
 export type InfractionTypeCode = string;
 
 /** 紙本反思卡種類（僅作顯示與統計分類用；填寫在紙上） */
 export const PAPER_CARDS = {
   /** 校園安全反思卡 */
-  SAFETY: 'SAFETY',
+  SAFETY: "SAFETY",
   /** 口說好話反思卡 */
-  KIND_WORDS: 'KIND_WORDS',
+  KIND_WORDS: "KIND_WORDS",
 } as const;
 export type PaperCard = (typeof PAPER_CARDS)[keyof typeof PAPER_CARDS];
 
 export const PAPER_CARD_LABEL: Record<PaperCard, string> = {
-  SAFETY: '校園安全反思卡',
-  KIND_WORDS: '口說好話反思卡',
+  SAFETY: "校園安全反思卡",
+  KIND_WORDS: "口說好話反思卡",
 };
 
 /* ------------------------------------------------------------------ *
@@ -65,15 +65,16 @@ export const PAPER_CARD_LABEL: Record<PaperCard, string> = {
 
 export const INFRACTION_STATUS = {
   /** 已登錄，紙本反思卡尚未回收 → 下課管制中 */
-  OPEN: 'OPEN',
+  OPEN: "OPEN",
   /** 紙本反思卡已回收 → 當日解除管制 */
-  DONE: 'DONE',
+  DONE: "DONE",
   /** 班級活動優先或其他事由免記，不計入再犯 */
-  EXEMPTED: 'EXEMPTED',
+  EXEMPTED: "EXEMPTED",
   /** 誤報撤銷，不計入再犯 */
-  VOIDED: 'VOIDED',
+  VOIDED: "VOIDED",
 } as const;
-export type InfractionStatus = (typeof INFRACTION_STATUS)[keyof typeof INFRACTION_STATUS];
+export type InfractionStatus =
+  (typeof INFRACTION_STATUS)[keyof typeof INFRACTION_STATUS];
 
 export interface Infraction {
   id: string;
@@ -127,19 +128,19 @@ export interface Infraction {
 
 export const RESTRICTION_REASONS = {
   /** 違規登錄 → 凍結當日自由下課，待紙本反思卡回收 */
-  INFRACTION_PAPER: 'INFRACTION_PAPER',
+  INFRACTION_PAPER: "INFRACTION_PAPER",
   /** 安全觀察員值勤日 */
-  OBSERVER_DUTY: 'OBSERVER_DUTY',
+  OBSERVER_DUTY: "OBSERVER_DUTY",
   /** 值勤結束但紙本行為檢討書尚未回收 */
-  OBSERVER_REVIEW_PENDING: 'OBSERVER_REVIEW_PENDING',
+  OBSERVER_REVIEW_PENDING: "OBSERVER_REVIEW_PENDING",
 } as const;
 export type RestrictionReason =
   (typeof RESTRICTION_REASONS)[keyof typeof RESTRICTION_REASONS];
 
 export const RESTRICTION_REASON_LABEL: Record<RestrictionReason, string> = {
-  INFRACTION_PAPER: '待回收反思卡',
-  OBSERVER_DUTY: '安全觀察員值勤',
-  OBSERVER_REVIEW_PENDING: '待回收檢討書',
+  INFRACTION_PAPER: "待回收反思卡",
+  OBSERVER_DUTY: "安全觀察員值勤",
+  OBSERVER_REVIEW_PENDING: "待回收檢討書",
 };
 
 export interface RecessRestriction {
@@ -158,7 +159,7 @@ export interface RecessRestriction {
     infractionId?: string;
     assignmentId?: string;
   }>;
-  status: 'ACTIVE' | 'LIFTED' | 'CANCELLED';
+  status: "ACTIVE" | "LIFTED" | "CANCELLED";
   /** 正向管教保障：管制期間仍可正常飲水與如廁 */
   allowWaterAndRestroom: true;
   /** 管制節次（安全觀察員為 5 節，扣除打掃時間與 5 分鐘短下課） */
@@ -175,20 +176,20 @@ export interface RecessRestriction {
  * ------------------------------------------------------------------ */
 
 export const ALERT_STATUS = {
-  OPEN: 'OPEN',
-  ACKNOWLEDGED: 'ACKNOWLEDGED',
-  ASSIGNED: 'ASSIGNED',
-  CLOSED: 'CLOSED',
-  DISMISSED: 'DISMISSED',
+  OPEN: "OPEN",
+  ACKNOWLEDGED: "ACKNOWLEDGED",
+  ASSIGNED: "ASSIGNED",
+  CLOSED: "CLOSED",
+  DISMISSED: "DISMISSED",
 } as const;
 export type AlertStatus = (typeof ALERT_STATUS)[keyof typeof ALERT_STATUS];
 
 export const ALERT_STATUS_LABEL: Record<AlertStatus, string> = {
-  OPEN: '待處理',
-  ACKNOWLEDGED: '已確認',
-  ASSIGNED: '已派安全觀察員',
-  CLOSED: '已結案',
-  DISMISSED: '已撤銷',
+  OPEN: "待處理",
+  ACKNOWLEDGED: "已確認",
+  ASSIGNED: "已派安全觀察員",
+  CLOSED: "已結案",
+  DISMISSED: "已撤銷",
 };
 
 export interface RecidivismAlert {
@@ -209,7 +210,11 @@ export interface RecidivismAlert {
   triggerInfractionId: string;
   /** 本次警示認列的違規（長度 = count） */
   infractionIds: string[];
-  breakdown: Array<{ infractionId: string; typeName: string; occurredOn: SchoolDate }>;
+  breakdown: Array<{
+    infractionId: string;
+    typeName: string;
+    occurredOn: SchoolDate;
+  }>;
   status: AlertStatus;
   assignmentId?: string;
   note?: string;
@@ -223,24 +228,24 @@ export interface RecidivismAlert {
 
 export const ASSIGNMENT_STATUS = {
   /** 已排定值勤日 */
-  SCHEDULED: 'SCHEDULED',
+  SCHEDULED: "SCHEDULED",
   /** 值勤中（已報到） */
-  IN_PROGRESS: 'IN_PROGRESS',
+  IN_PROGRESS: "IN_PROGRESS",
   /** 值勤完成，待回收紙本行為檢討書 */
-  DUTY_COMPLETED: 'DUTY_COMPLETED',
+  DUTY_COMPLETED: "DUTY_COMPLETED",
   /** 已回收檢討書，隔日解鎖 */
-  CLOSED: 'CLOSED',
-  CANCELLED: 'CANCELLED',
+  CLOSED: "CLOSED",
+  CANCELLED: "CANCELLED",
 } as const;
 export type AssignmentStatus =
   (typeof ASSIGNMENT_STATUS)[keyof typeof ASSIGNMENT_STATUS];
 
 export const ASSIGNMENT_STATUS_LABEL: Record<AssignmentStatus, string> = {
-  SCHEDULED: '已排定',
-  IN_PROGRESS: '值勤中',
-  DUTY_COMPLETED: '待回收檢討書',
-  CLOSED: '已結案',
-  CANCELLED: '已取消',
+  SCHEDULED: "已排定",
+  IN_PROGRESS: "值勤中",
+  DUTY_COMPLETED: "待回收檢討書",
+  CLOSED: "已結案",
+  CANCELLED: "已取消",
 };
 
 export interface ObserverPeriodLog {
@@ -316,6 +321,12 @@ export interface SystemSettings {
   recidivismWindowDays: number;
   /** 觸發門檻次數 — 預設 3 */
   recidivismThreshold: number;
+  /**
+   * 期間內第幾次起才發紙本反思卡（預設 2）。
+   * 設 2 代表：視窗內第一次只做記錄勸導，不發卡也不管制下課；
+   * 第二次起才發卡並凍結當日自由下課。設 1 則每次都發卡。
+   */
+  cardFromOffense: number;
   /** 安全觀察員值勤節數 — 預設 5 */
   observerPeriods: number;
   /** 管制節次清單（扣除打掃與 5 分鐘短下課） */
@@ -340,9 +351,10 @@ export interface SystemSettings {
 export const DEFAULT_SETTINGS: SystemSettings = {
   recidivismWindowDays: 15,
   recidivismThreshold: 3,
+  cardFromOffense: 2,
   observerPeriods: 5,
   observerPeriodNumbers: [1, 2, 3, 4, 5],
-  timezone: 'Asia/Taipei',
+  timezone: "Asia/Taipei",
   carryOverUnfinished: true,
   publicBoard: { enabled: true, showRoster: false },
 };

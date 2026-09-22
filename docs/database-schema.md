@@ -66,6 +66,7 @@ erDiagram
 ```jsonc
 {
   "recidivismWindowDays": 15,      // 回溯天數（含當天）
+  "cardFromOffense": 2,            // 第幾次起發反思卡（1 = 每次都發）
   "recidivismThreshold": 3,        // 觸發次數
   "observerPeriods": 5,            // 安全觀察員值勤節數
   "observerPeriodNumbers": [1,2,3,4,5],
@@ -90,7 +91,9 @@ erDiagram
 
   "typeCode": "RUN_IN_CORRIDOR", "typeName": "走廊奔跑",
   "paperCard": "SAFETY",                     // 統計分類：SAFETY | KIND_WORDS
-  "paperCardLabel": "校園安全反思卡",         // 登錄當下的卡名（後台改名不影響歷史）
+  "paperCardLabel": "校園安全反思卡",         // 登錄當下的卡名；未發卡時為 null
+  "cardIssued": true,                        // 期間內第一次僅記錄勸導 → false
+  "offenseIndex": 2,                          // 本次是視窗內的第幾次（含本次）
 
   "occurredAt": "2026-09-18T02:10:00.000Z",  // 時點（UTC）
   "occurredOn": "2026-09-18",                // ★ 再犯基準日（違規發生日）

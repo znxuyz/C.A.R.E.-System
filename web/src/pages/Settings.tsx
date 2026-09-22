@@ -377,6 +377,7 @@ export function Settings() {
     try {
       await api.updateSettings({
         recidivismWindowDays: form.recidivismWindowDays,
+        cardFromOffense: form.cardFromOffense,
         recidivismThreshold: form.recidivismThreshold,
         observerPeriodNumbers: form.observerPeriodNumbers,
         carryOverUnfinished: form.carryOverUnfinished,
@@ -457,6 +458,20 @@ export function Settings() {
               </div>
             </Field>
             <Field
+              label="第幾次起發反思卡"
+              hint="填 2 代表：期間內第一次只做記錄勸導，不用寫反思卡、下課也不受影響；第二次起才發卡並凍結當日自由下課。填 1 則每次都發卡。"
+            >
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={form.cardFromOffense}
+                onChange={(event) =>
+                  patch({ cardFromOffense: Number(event.target.value) })
+                }
+              />
+            </Field>
+            <Field
               label="觸發次數"
               hint="同一位學生在上述期間內累計到第幾次違規，就發出再犯警示。填 3 代表第 3 次時觸發。1–20 次，預設 3 次。"
             >
@@ -480,6 +495,10 @@ export function Settings() {
               違規時，系統會發出再犯警示，並自動把他排入
               <strong>安全觀察員追蹤清單</strong>（值勤一日下課{" "}
               {form.observerPeriods} 節）。
+              <br />
+              期間內<strong>第 {form.cardFromOffense} 次起</strong>
+              才發紙本反思卡並凍結當日自由下課；
+              在那之前只做記錄勸導，學生不必寫東西、下課照常。
               <br />
               計入的是<strong>違規登錄的筆數</strong>
               （走廊奔跑與口出穢言合併計算）；已被某次警示認列的違規會標記為

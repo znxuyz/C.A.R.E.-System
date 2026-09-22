@@ -347,6 +347,19 @@ describe('系統管理者', () => {
         updatedAt: serverTimestamp(),
       }),
     );
+    // 發卡起算次數：範圍內可存、超出範圍被拒
+    await assertSucceeds(
+      setDoc(doc(db, 'settings', 'system'), {
+        recidivismWindowDays: 15, recidivismThreshold: 3, observerPeriods: 5,
+        cardFromOffense: 2, updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db, 'settings', 'system'), {
+        recidivismWindowDays: 15, recidivismThreshold: 3, observerPeriods: 5,
+        cardFromOffense: 0, updatedAt: serverTimestamp(),
+      }),
+    );
     await assertFails(
       setDoc(doc(db, 'settings', 'system'), {
         recidivismWindowDays: 999, recidivismThreshold: 3, observerPeriods: 5,

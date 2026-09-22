@@ -181,6 +181,11 @@ service cloud.firestore {
         && request.resource.data.recidivismWindowDays is int
         && request.resource.data.recidivismWindowDays >= 1
         && request.resource.data.recidivismWindowDays <= 365
+        // 發卡起算次數為後加欄位：沒帶就沿用預設，有帶則檢查範圍
+        && (!('cardFromOffense' in request.resource.data)
+            || (request.resource.data.cardFromOffense is int
+                && request.resource.data.cardFromOffense >= 1
+                && request.resource.data.cardFromOffense <= 20))
         && request.resource.data.recidivismThreshold is int
         && request.resource.data.recidivismThreshold >= 1
         && request.resource.data.recidivismThreshold <= 20

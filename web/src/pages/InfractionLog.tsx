@@ -63,7 +63,9 @@ export function InfractionLog() {
   const [result, setResult] = useState<{
     studentName: string;
     className: string;
-    paperCardLabel: string;
+    paperCardLabel: string | null;
+    cardIssued: boolean;
+    offenseIndex: number;
     triggered: boolean;
     count: number;
     shortfall: number;
@@ -154,6 +156,10 @@ export function InfractionLog() {
 
   // 回溯天數可於後台調整，畫面文案一律跟著設定走（預設 15 天）
   const windowDays = settings?.recidivismWindowDays ?? 15;
+  const cardFromOffense = settings?.cardFromOffense ?? 2;
+  /** 若現在送出，這會是視窗內的第幾次；據此預告會不會發卡 */
+  const nextOffenseIndex = (windowCount ?? 0) + 1;
+  const willIssueCard = nextOffenseIndex >= cardFromOffense;
   // 已畢業／轉出的學生不得登錄（後端也會擋，這裡先讓現場知道）
   const inactive = matched?.active === false;
   const canSubmit =
@@ -174,6 +180,8 @@ export function InfractionLog() {
         studentName: response.studentName,
         className: response.className,
         paperCardLabel: response.paperCardLabel,
+        cardIssued: response.cardIssued,
+        offenseIndex: response.offenseIndex,
         triggered: response.recidivism.triggered,
         count: response.recidivism.count,
         shortfall: response.recidivism.shortfall,
@@ -201,10 +209,22 @@ export function InfractionLog() {
         <Panel title="登錄完成" hint="系統已自動處理下列事項">
           <div className="stack">
             <div className="row">
-              <Badge tone="good" dot>
-                已凍結 {result.className} {result.studentName} 當日自由下課
-              </Badge>
-              <Badge tone="safety">應發：{result.paperCardLabel}</Badge>
+              {result.cardIssued ? (
+                <>
+                  <Badge tone="good" dot>
+                    已凍結 {result.className} {result.studentName} 當日自由下課
+                  </Badge>
+                  <Badge tone="safety">應發：{result.paperCardLabel}</Badge>
+                </>
+              ) : (
+                <>
+                  <Badge tone="neutral" dot>
+                    已記錄 {result.className} {result.studentName}（期間內第{" "}
+                    {result.offenseIndex} 次）
+                  </Badge>
+                  <Badge tone="good">不必寫反思卡・下課不受影響</Badge>
+                </>
+              )}
             </div>
             <Callout
               tone={
@@ -458,8 +478,9 @@ export function InfractionLog() {
               {busy ? "登錄中…" : "登錄違規"}
             </button>
             <span className="small muted">
-              送出後：凍結當日自由下課 → 發放紙本反思卡 → 自動計算 {windowDays}{" "}
-              天內再犯次數
+              {matched && !willIssueCard
+                ? `送出後：僅記錄勸導（期間內第 ${nextOffenseIndex} 次）→ 不發反思卡、下課不受影響 → 自動計算 ${windowDays} 天內再犯次數`
+                : `送出後：凍結當日自由下課 → 發放紙本反思卡 → 自動計算 ${windowDays} 天內再犯次數`}
             </span>
           </div>
         </div>

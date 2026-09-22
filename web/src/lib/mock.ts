@@ -27,6 +27,8 @@ import type {
 
 const WINDOW_DAYS = 15;
 const THRESHOLD = 3;
+/** 期間內第幾次起才發反思卡（與正式環境的 settings.cardFromOffense 一致） */
+const CARD_FROM_OFFENSE = 2;
 
 const shift = (date: string, days: number): string => {
   const [y, m, d] = date.split("-").map(Number) as [number, number, number];
@@ -49,6 +51,7 @@ export const MOCK_SESSION: Session = {
 const mockSettings: SystemSettings = {
   recidivismWindowDays: 15,
   recidivismThreshold: 3,
+  cardFromOffense: CARD_FROM_OFFENSE,
   observerPeriods: 5,
   observerPeriodNumbers: [1, 2, 3, 4, 5],
   carryOverUnfinished: true,
@@ -639,13 +642,16 @@ export const mockApi = {
     if (!student) throw new Error(`查無學號 ${input.studentNo} 的學生`);
     const type = TYPES.find((t) => t.code === input.typeCode);
     if (!type) throw new Error("請選擇違規類型");
+    // 期間內第一次只做記錄勸導：不發卡、不凍結下課
+    const offenseIndex = store.countWindow(student.id) + 1;
+    const cardIssued = offenseIndex >= CARD_FROM_OFFENSE;
     const id = store.add(
       student.id,
       0,
       input.typeCode,
       input.locationCode,
       input.periodNo,
-      "OPEN",
+      cardIssued ? "OPEN" : "DONE",
     );
     const target = store.infractions.find((i) => i.id === id)!;
     target.note = input.note;
@@ -655,7 +661,9 @@ export const mockApi = {
       studentId: student.id,
       studentName: student.name,
       className: student.className,
-      paperCardLabel: type.paperCardLabel,
+      paperCardLabel: cardIssued ? type.paperCardLabel : null,
+      cardIssued,
+      offenseIndex,
       recidivism: {
         triggered: Boolean(alert),
         count: alert ? alert.count : store.countWindow(student.id),

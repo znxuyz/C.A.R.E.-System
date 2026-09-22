@@ -29,6 +29,7 @@ import {
 import {
   assertCanAnnotate,
   assertCanReturnPaper,
+  shouldIssuePaperCard,
   unlockDateForPaperReturn,
 } from "../domain/caseRules.js";
 import {
@@ -67,7 +68,11 @@ export interface LogInfractionInput {
 
 export interface LogInfractionResult {
   infractionId: string;
-  paperCardLabel: string;
+  /** 未發卡（期間內第一次、僅記錄勸導）時為 null */
+  paperCardLabel: string | null;
+  cardIssued: boolean;
+  /** 本次是視窗內的第幾次（含本次） */
+  offenseIndex: number;
   recidivism: {
     triggered: boolean;
     count: number;
@@ -144,6 +149,17 @@ export async function logInfraction(
     const counted = counts ? [...cached, entry] : cached;
     const triggered = counted.length >= settings.recidivismThreshold;
 
+    /*
+     * 本次是視窗內的第幾次（含本次）。不計入再犯的類型仍需要一個序位來
+     * 判斷發不發卡，因此以「既有筆數 + 1」計算。
+     */
+    const offenseIndex = counts ? counted.length : cached.length + 1;
+    // 期間內第一次只做記錄勸導：不發卡、當日也不凍結自由下課
+    const issueCard = shouldIssuePaperCard(
+      offenseIndex,
+      settings.cardFromOffense,
+    );
+
     // ---- 寫入階段 ----
     tx.set(infractionRef, {
       studentId: input.student.id,
@@ -156,7 +172,10 @@ export async function logInfraction(
       typeName: input.type.name,
       paperCard: input.type.paperCard,
       // 卡名一併存進事件裡：日後後台改名或刪除類型，歷史紀錄仍顯示當時的卡名
-      paperCardLabel: paperCardLabel(input.type),
+      paperCardLabel: issueCard ? paperCardLabel(input.type) : null,
+      // 未發卡（期間內第一次）就沒有待回收的紙本，直接結案並留下序位供追溯
+      cardIssued: issueCard,
+      offenseIndex,
       occurredAt: input.occurredAt,
       occurredOn: input.occurredOn,
       periodNo: input.periodNo,
@@ -164,7 +183,7 @@ export async function logInfraction(
       locationName: input.location.name,
       note: input.note ?? null,
       recordedBy: { uid: ctx.actor.uid, name: ctx.actor.name },
-      status: INFRACTION_STATUS.OPEN,
+      status: issueCard ? INFRACTION_STATUS.OPEN : INFRACTION_STATUS.DONE,
       paperReturnedAt: null,
       paperReturnedOn: null,
       exemptReason: null,
@@ -176,19 +195,21 @@ export async function logInfraction(
       updatedAt: serverTimestamp(),
     });
 
-    // 違規當日凍結自由下課，待紙本反思卡回收
-    tx.set(
-      paperRestrictionRef,
-      mergeRestriction(paperSnap.data(), {
-        student: input.student,
-        date: input.occurredOn,
-        reason: RESTRICTION_REASONS.INFRACTION_PAPER,
-        periods: [],
-        sourceRef: { infractionId: infractionRef.id },
-        note: `${input.type.name}｜待回收${paperCardLabel(input.type)}`,
-      }),
-      { merge: true },
-    );
+    // 發卡才凍結當日自由下課（待紙本反思卡回收）；只做記錄勸導時不影響下課
+    if (issueCard) {
+      tx.set(
+        paperRestrictionRef,
+        mergeRestriction(paperSnap.data(), {
+          student: input.student,
+          date: input.occurredOn,
+          reason: RESTRICTION_REASONS.INFRACTION_PAPER,
+          periods: [],
+          sourceRef: { infractionId: infractionRef.id },
+          note: `${input.type.name}｜待回收${paperCardLabel(input.type)}`,
+        }),
+        { merge: true },
+      );
+    }
 
     if (triggered) {
       tx.set(alertRef, {
@@ -280,7 +301,9 @@ export async function logInfraction(
 
     return {
       infractionId: infractionRef.id,
-      paperCardLabel: paperCardLabel(input.type),
+      paperCardLabel: issueCard ? paperCardLabel(input.type) : null,
+      cardIssued: issueCard,
+      offenseIndex,
       recidivism: {
         triggered,
         count: counted.length,
