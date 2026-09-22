@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
+import { describeFirestoreError } from "../lib/errors.ts";
 import { useToast } from "../components/toast.tsx";
 import {
   Badge,
@@ -188,7 +189,7 @@ export function InfractionLog() {
       setNote("");
       setMatched(null);
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : "登錄失敗", "error");
+      toast.push(`登錄失敗：${describeFirestoreError(error)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -259,7 +260,7 @@ export function InfractionLog() {
               }
               error={
                 searchError
-                  ? `名冊讀取失敗：${searchError}（資料仍在雲端，這是讀取問題 —— 請確認此帳號已授權並連上網路）`
+                  ? `名冊讀取失敗：${searchError}`
                   : keyword.trim() !== "" && candidates.length === 0
                     ? "查無相符的學生（若尚未匯入名冊，請先到「系統設定 → 學生名冊」匯入）"
                     : undefined

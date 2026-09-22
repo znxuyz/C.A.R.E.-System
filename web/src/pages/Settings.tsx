@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
 import { USE_MOCK, firebaseConfig } from "../firebase/client.ts";
+import { describeFirestoreError } from "../lib/errors.ts";
 import { Callout, Field, Panel } from "../components/ui.tsx";
 import { useToast } from "../components/toast.tsx";
 import type {
@@ -74,6 +75,10 @@ export function Settings() {
   const [rebuilding, setRebuilding] = useState(false);
   /** 讀取失敗的原因（權限不足、離線等）；不顯示的話會被誤認為「資料不見了」 */
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [diagnosis, setDiagnosis] = useState<Awaited<
+    ReturnType<typeof api.diagnose>
+  > | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
   const [existing, setExisting] = useState<ExistingStudent[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -106,7 +111,7 @@ export function Settings() {
       )
       .catch((error) => {
         setLocations([]);
-        setLoadError(error instanceof Error ? error.message : "地點載入失敗");
+        setLoadError(`地點載入失敗：${describeFirestoreError(error)}`);
       });
   }, []);
 
@@ -118,9 +123,7 @@ export function Settings() {
       .then((rows) => setTypes(rows))
       .catch((error) => {
         setTypes([]);
-        setLoadError(
-          error instanceof Error ? error.message : "違規類型載入失敗",
-        );
+        setLoadError(`違規類型載入失敗：${describeFirestoreError(error)}`);
       });
   }, []);
 
@@ -132,7 +135,7 @@ export function Settings() {
       .then(setExisting)
       .catch((error) => {
         setExisting([]);
-        setLoadError(error instanceof Error ? error.message : "名冊載入失敗");
+        setLoadError(`名冊載入失敗：${describeFirestoreError(error)}`);
       });
   }, []);
 
@@ -192,7 +195,7 @@ export function Settings() {
       setTypeForm(null);
       loadTypes();
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : "儲存失敗", "error");
+      toast.push(`儲存失敗：${describeFirestoreError(error)}`, "error");
     } finally {
       setSavingType(false);
     }
@@ -211,7 +214,7 @@ export function Settings() {
       toast.push(`已刪除「${type.name}」`);
       loadTypes();
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : "刪除失敗", "error");
+      toast.push(`刪除失敗：${describeFirestoreError(error)}`, "error");
     }
   };
 
@@ -226,7 +229,7 @@ export function Settings() {
       setNewHotspot(false);
       loadLocations();
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : "新增失敗", "error");
+      toast.push(`新增失敗：${describeFirestoreError(error)}`, "error");
     } finally {
       setSavingLocation(false);
     }
@@ -258,7 +261,7 @@ export function Settings() {
       toast.push(`已刪除地點「${location.name}」`);
       loadLocations();
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : "刪除失敗", "error");
+      toast.push(`刪除失敗：${describeFirestoreError(error)}`, "error");
     }
   };
 
@@ -285,6 +288,15 @@ export function Settings() {
     if (fileInput.current) fileInput.current.value = "";
   };
 
+  const runDiagnose = async () => {
+    setDiagnosing(true);
+    try {
+      setDiagnosis(await api.diagnose());
+    } finally {
+      setDiagnosing(false);
+    }
+  };
+
   const clearLocalCache = () => {
     api.clearLocalCache();
     window.location.reload();
@@ -298,7 +310,7 @@ export function Settings() {
         `搜尋索引已重建：${result.students} 位學生、${result.chunks} 份索引文件`,
       );
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : "重建失敗", "error");
+      toast.push(`重建失敗：${describeFirestoreError(error)}`, "error");
     } finally {
       setRebuilding(false);
     }
@@ -336,6 +348,12 @@ export function Settings() {
           `），共 ${result.classes} 個班級`,
       );
       loadRoster();
+      if (!result.indexWritten) {
+        toast.push(
+          "學生資料已寫入雲端，但搜尋索引未建立：Firebase 安全規則缺少 rosterIndex 段落，請重新發布 firestore.rules 後按「重建搜尋索引」。",
+          "error",
+        );
+      }
       if (result.errors.length > 0) {
         toast.push(
           `有 ${result.errors.length} 行未匯入：${result.errors[0]}`,
@@ -346,7 +364,7 @@ export function Settings() {
         clearFile();
       }
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : "匯入失敗", "error");
+      toast.push(`匯入失敗：${describeFirestoreError(error)}`, "error");
     } finally {
       setImporting(false);
     }
@@ -367,7 +385,7 @@ export function Settings() {
       setSaved(form);
       toast.push("設定已儲存，之後登錄的違規即依新參數判定");
     } catch (error) {
-      toast.push(error instanceof Error ? error.message : "儲存失敗", "error");
+      toast.push(`儲存失敗：${describeFirestoreError(error)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -1017,6 +1035,37 @@ export function Settings() {
             </span>
           </div>
 
+          {diagnosis && (
+            <Callout
+              tone={
+                diagnosis.checks.some((check) => !check.ok)
+                  ? "warning"
+                  : undefined
+              }
+            >
+              <span aria-hidden="true">🔍</span>
+              <span>
+                <strong>權限檢查</strong>（{diagnosis.email ?? diagnosis.uid}
+                ・角色 {diagnosis.roles.join("、") || "無"}）
+                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                  {diagnosis.checks.map((check) => (
+                    <li key={check.name}>
+                      {check.ok ? "✅" : "❌"} {check.name}
+                      {check.detail && (
+                        <div
+                          className="small"
+                          style={{ whiteSpace: "pre-line" }}
+                        >
+                          {check.detail}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </span>
+            </Callout>
+          )}
+
           <Callout>
             <span aria-hidden="true">☁️</span>
             <span>
@@ -1040,6 +1089,13 @@ export function Settings() {
             </button>
             <button className="btn" onClick={clearLocalCache}>
               清除本機快取並重新載入
+            </button>
+            <button
+              className="btn"
+              disabled={diagnosing}
+              onClick={() => void runDiagnose()}
+            >
+              {diagnosing ? "檢查中…" : "檢查權限"}
             </button>
             <span className="small muted">
               搜尋是讀「名冊索引」而非逐份讀學生資料，可大幅減少 Firebase

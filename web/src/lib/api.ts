@@ -11,9 +11,12 @@
  */
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
+  serverTimestamp,
+  setDoc,
   limit as fsLimit,
   orderBy,
   query,
@@ -32,6 +35,7 @@ import {
 } from "firebase/auth";
 import { USE_MOCK, firebase, firebaseConfig } from "../firebase/client.ts";
 import { MOCK_SESSION, mockApi } from "./mock.ts";
+import { describeFirestoreError } from "./errors.ts";
 import { todayTaipei } from "./format.ts";
 import { COL } from "../core/firestore/paths.ts";
 import { systemClock, type Ctx } from "../core/services/context.ts";
@@ -911,6 +915,65 @@ export const api = {
   },
 
   /**
+   * 權限自我診斷。
+   * 逐項實測「讀得到嗎／寫得進去嗎」，直接指出是規則沒發布還是角色不足。
+   */
+  async diagnose(): Promise<{
+    uid: string;
+    email?: string;
+    roles: string[];
+    checks: Array<{ name: string; ok: boolean; detail?: string }>;
+  }> {
+    const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
+    if (USE_MOCK) {
+      return {
+        uid: "mock",
+        roles: MOCK_SESSION.roles,
+        checks: [{ name: "示範模式（不連線 Firebase）", ok: true }],
+      };
+    }
+    const session = currentSession;
+    const uid = session?.uid ?? firebase()!.auth.currentUser?.uid ?? "";
+
+    const probe = async (name: string, run: () => Promise<unknown>) => {
+      try {
+        await run();
+        checks.push({ name, ok: true });
+      } catch (error) {
+        checks.push({ name, ok: false, detail: describeFirestoreError(error) });
+      }
+    };
+
+    await probe("讀取角色（staff）", () => getDoc(doc(db(), COL.staff, uid)));
+    await probe("讀取學生名冊（students）", () =>
+      getDocs(query(collection(db(), COL.students), fsLimit(1))),
+    );
+    await probe("讀取名冊索引（rosterIndex）", () =>
+      readRosterIndexMeta({ db: db() }),
+    );
+    await probe("寫入名冊索引（rosterIndex）", async () => {
+      const ref = doc(db(), COL.rosterIndex, "_probe");
+      await setDoc(ref, {
+        students: [],
+        count: 0,
+        version: 0,
+        updatedAt: serverTimestamp(),
+      });
+      await deleteDoc(ref);
+    });
+    await probe("讀取系統設定（settings）", () =>
+      getDoc(doc(db(), COL.settings, "system")),
+    );
+
+    return {
+      uid,
+      ...(session?.email ? { email: session.email } : {}),
+      roles: session?.roles ?? [],
+      checks,
+    };
+  },
+
+  /**
    * 清除本機快取（名冊索引與設定）。
    * 資料本身在 Firestore，清掉只是強制重讀 —— 用來排除「某台裝置看到舊資料」。
    */
@@ -964,6 +1027,7 @@ export const api = {
         created: rows.length,
         reclassed: 0,
         deactivated: 0,
+        indexWritten: true,
         errors,
       };
     }

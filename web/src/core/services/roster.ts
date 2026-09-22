@@ -289,6 +289,9 @@ export async function importStudents(
   created: number;
   reclassed: number;
   deactivated: number;
+  /** 學生資料已寫入，但搜尋索引未建立（通常是安全規則未更新） */
+  indexWritten: boolean;
+  indexError?: string;
 }> {
   if (rows.length === 0) throw new Error("沒有可匯入的資料");
 
@@ -377,7 +380,16 @@ export async function importStudents(
       active: true,
     });
   });
-  await writeRosterIndex(ctx, [...byId.values()]);
+  // 索引只是搜尋用的加速結構：學生資料已經寫入，索引失敗不該讓整批匯入變成失敗。
+  // 常見原因是安全規則還沒發布 rosterIndex 那一段。
+  let indexWritten = true;
+  let indexError: string | undefined;
+  try {
+    await writeRosterIndex(ctx, [...byId.values()]);
+  } catch (error) {
+    indexWritten = false;
+    indexError = error instanceof Error ? error.message : String(error);
+  }
 
   const summary = {
     students: rows.length,
@@ -385,6 +397,8 @@ export async function importStudents(
     created: diff.created.length,
     reclassed: diff.reclassed.length,
     deactivated: toDeactivate.length,
+    indexWritten,
+    ...(indexError ? { indexError } : {}),
   };
 
   await addDoc(
