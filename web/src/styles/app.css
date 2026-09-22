@@ -212,6 +212,39 @@ a {
   display: grid;
   gap: var(--space-4);
 }
+/* 格線／彈性容器的子元素預設 min-width:auto，長字串（信箱、代碼）會把版面撐寬 */
+.grid > *,
+.form-grid > *,
+.row > *,
+.main,
+.content {
+  min-width: 0;
+}
+.content > *,
+.grid,
+.form-grid,
+.card {
+  max-width: 100%;
+}
+/*
+ * 1fr 欄的自動最小值是內容的 min-content，橫向捲動的導覽列會把整欄撐寬，
+ * 於是整頁跟著變寬、手機上被迫左右滑。min-width:0 讓它乖乖捲自己的內容。
+ */
+.shell > *,
+.sidebar,
+.nav,
+.topbar {
+  min-width: 0;
+}
+.callout > span,
+.card,
+.field {
+  overflow-wrap: anywhere;
+}
+code,
+.mono {
+  overflow-wrap: anywhere;
+}
 .grid--kpi {
   grid-template-columns: repeat(auto-fit, minmax(212px, 1fr));
 }
@@ -582,21 +615,54 @@ input[type="number"],
 input[type="password"],
 input[type="date"],
 input[type="email"],
+input[type="file"],
 select,
 textarea {
   width: 100%;
-  padding: 9px var(--space-3);
-  border: 1px solid var(--line-2);
+  min-height: 44px; /* 觸控目標；手機單手操作用 */
+  padding: 10px var(--space-3);
+  border: 1.5px solid var(--line-field);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--ink-1);
   font: inherit;
+}
+input[type="text"]:hover,
+input[type="number"]:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--brand-400);
+}
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="password"]:focus,
+input[type="date"]:focus,
+input[type="email"]:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--brand-500);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-400) 25%, transparent);
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background: var(--surface-sunken);
+  color: var(--ink-3);
 }
 textarea {
   min-height: 96px;
   resize: vertical;
   line-height: 1.6;
 }
+/* 班級／座號兩個下拉：桌機並排且不必占滿整列，手機各自整列 */
+.select--class {
+  max-width: 160px;
+}
+.select--seat {
+  max-width: 220px;
+}
+
 .form-grid {
   display: grid;
   gap: var(--space-4);
@@ -990,23 +1056,147 @@ textarea {
   .shell {
     grid-template-columns: 1fr;
   }
+
+  /* 側欄改成頁首：品牌一行、導覽一條可橫向捲動的標籤列 */
   .sidebar {
-    position: static;
+    position: static; /* 手機畫面小，不讓頁首長期佔位；頂欄本身仍是 sticky */
     height: auto;
-    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3) 0 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-1);
+  }
+  .brand {
+    padding: 0 var(--space-4);
+    gap: var(--space-2);
+  }
+  .brand__mark {
+    width: 28px;
+    height: 28px;
+    font-size: 10px;
+  }
+  .brand__sub {
+    display: none;
   }
   .nav {
     flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 4px;
     overflow-x: auto;
+    padding: 0 var(--space-4) var(--space-3);
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+  /* 分組容器在桌機是直欄；手機改用 display:contents 讓項目直接成為橫排的成員 */
+  .nav > div {
+    display: contents;
+  }
+  .nav__item {
+    flex: 0 0 auto; /* 不壓縮，才不會出現「帳號管／理」這種斷字 */
+    white-space: nowrap;
+    padding: 8px 12px;
+    border: 1px solid var(--line-1);
+  }
+  .nav__item--active {
+    border-color: var(--brand-500);
   }
   .nav__group {
     display: none;
   }
+  .sidebar__footer {
+    margin-top: 0;
+    padding: 0 var(--space-4) var(--space-3);
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    font-size: 12px;
+  }
+  .sidebar__footer .badge {
+    font-size: 11px;
+  }
+
+  .topbar {
+    padding: var(--space-3) var(--space-4);
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
   .content {
     padding: var(--space-4);
   }
-  .topbar {
-    padding: var(--space-3) var(--space-4);
+
+  /* 單欄化：避免最小寬度把版面撐出畫面外 */
+  .grid--2,
+  .form-grid,
+  .choice-grid,
+  .type-grid {
+    grid-template-columns: 1fr;
+  }
+  .grid--kpi {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+  .card__head {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  /*
+   * 14 根柱子＋日期標籤在手機上至少需要 420px，硬塞會把整頁撐寬。
+   * 改成只有圖表自己可以左右滑動，頁面本身維持不溢出。
+   */
+  .chart {
+    overflow-x: auto;
+    min-width: 0; /* 少了這行，捲動容器仍會以 min-content 撐寬外層 */
+    padding-bottom: 4px;
+  }
+  .card__body,
+  .card {
+    min-width: 0;
+  }
+  .trend,
+  .trend-table {
+    min-width: 420px;
+  }
+  .trend__col {
+    min-width: 0;
+  }
+  .bar-row {
+    grid-template-columns: 76px 1fr 32px;
+  }
+
+  /* 表格寧可整塊左右滑，也不要把中文壓成一個字一行 */
+  table.data th,
+  table.data td {
+    white-space: nowrap;
+  }
+  .cell-sub {
+    white-space: normal;
+  }
+  .btn {
+    min-height: 40px;
+  }
+  .btn--lg {
+    width: 100%;
+  }
+  .select--class,
+  .select--seat {
+    max-width: none;
+  }
+}
+
+/* iOS 會在字級小於 16px 的輸入框上自動放大頁面，直接指定 16px 可避免 */
+@media (max-width: 640px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="password"],
+  input[type="date"],
+  input[type="email"],
+  select,
+  textarea {
+    font-size: 16px;
   }
 }
 

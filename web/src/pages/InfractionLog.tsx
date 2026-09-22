@@ -271,7 +271,7 @@ export function InfractionLog() {
                     setKeyword("");
                     setCandidates([]);
                   }}
-                  style={{ maxWidth: 160 }}
+                  className="select--class"
                 >
                   <option value="">選班級</option>
                   {classes.map((name) => (
@@ -290,7 +290,7 @@ export function InfractionLog() {
                       ) ?? null,
                     )
                   }
-                  style={{ maxWidth: 200 }}
+                  className="select--seat"
                 >
                   <option value="">選座號</option>
                   {classRoster.map((row) => (
