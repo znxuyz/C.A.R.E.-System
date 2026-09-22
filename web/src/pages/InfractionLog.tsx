@@ -51,6 +51,8 @@ export function InfractionLog() {
   const [classRoster, setClassRoster] = useState<StudentHit[]>([]);
   // 選定學生後才查他的再犯次數（1 次讀取），名冊索引本身不存這個數字
   const [windowCount, setWindowCount] = useState<number | null>(null);
+  /** 搜尋失敗的原因；不顯示會讓權限或網路問題看起來像「查無此人」 */
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [matched, setMatched] = useState<StudentHit | null>(null);
   const [typeCode, setTypeCode] = useState("");
   const [locationCode, setLocationCode] = useState("");
@@ -96,15 +98,23 @@ export function InfractionLog() {
       return;
     }
     let cancelled = false;
-    void api.searchStudent(trimmed).then((rows) => {
-      if (cancelled) return;
-      const hits = rows as StudentHit[];
-      setCandidates(hits);
-      // 只有「學號完全相同」或「唯一一筆結果」才自動帶入，
-      // 同名同姓時一律讓使用者自己點，避免登錯人
-      const exact = hits.find((row) => row.studentNo === trimmed);
-      setMatched(exact ?? (hits.length === 1 ? (hits[0] ?? null) : null));
-    });
+    void api
+      .searchStudent(trimmed)
+      .then((rows) => {
+        if (cancelled) return;
+        setSearchError(null);
+        const hits = rows as StudentHit[];
+        setCandidates(hits);
+        // 只有「學號完全相同」或「唯一一筆結果」才自動帶入，
+        // 同名同姓時一律讓使用者自己點，避免登錯人
+        const exact = hits.find((row) => row.studentNo === trimmed);
+        setMatched(exact ?? (hits.length === 1 ? (hits[0] ?? null) : null));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setCandidates([]);
+        setSearchError(error instanceof Error ? error.message : "名冊讀取失敗");
+      });
     return () => {
       cancelled = true;
     };
@@ -248,9 +258,11 @@ export function InfractionLog() {
                     : "學號、姓名或班級皆可，中間的字也找得到（例：小明、六年四班）"
               }
               error={
-                keyword.trim() !== "" && candidates.length === 0
-                  ? "查無相符的學生（若尚未匯入名冊，請先到「系統設定 → 學生名冊」匯入）"
-                  : undefined
+                searchError
+                  ? `名冊讀取失敗：${searchError}（資料仍在雲端，這是讀取問題 —— 請確認此帳號已授權並連上網路）`
+                  : keyword.trim() !== "" && candidates.length === 0
+                    ? "查無相符的學生（若尚未匯入名冊，請先到「系統設定 → 學生名冊」匯入）"
+                    : undefined
               }
             >
               <input

@@ -30,7 +30,7 @@ import {
   signOut as fbSignOut,
   type User,
 } from "firebase/auth";
-import { USE_MOCK, firebase } from "../firebase/client.ts";
+import { USE_MOCK, firebase, firebaseConfig } from "../firebase/client.ts";
 import { MOCK_SESSION, mockApi } from "./mock.ts";
 import { todayTaipei } from "./format.ts";
 import { COL } from "../core/firestore/paths.ts";
@@ -69,6 +69,7 @@ import {
 } from "../core/domain/studentSearch.ts";
 import {
   readRosterIndex,
+  readRosterIndexMeta,
   writeRosterIndex,
 } from "../core/services/rosterIndex.ts";
 import {
@@ -909,6 +910,15 @@ export const api = {
     return { students: rows.length, chunks };
   },
 
+  /**
+   * 清除本機快取（名冊索引與設定）。
+   * 資料本身在 Firestore，清掉只是強制重讀 —— 用來排除「某台裝置看到舊資料」。
+   */
+  clearLocalCache() {
+    invalidateRosterIndex();
+    settingsCache = null;
+  },
+
   /** 目前名冊（比對新舊名冊用；只取比對需要的欄位） */
   async rosterSnapshot(): Promise<ExistingStudent[]> {
     if (USE_MOCK) return [];
@@ -981,51 +991,83 @@ export const api = {
  * 這裡集中三道節流：名冊索引、系統設定快取、公開看板重建間隔。
  */
 
-const ROSTER_INDEX_KEY = "care.rosterIndex";
-/** 名冊只有匯入時會變，快取 12 小時；本機匯入後會主動失效 */
-const ROSTER_INDEX_TTL = 12 * 60 * 60 * 1000;
+/*
+ * 名冊快取一定要能跨裝置自我校正：
+ * 每次開啟只讀一份 rosterIndex/meta（1 次讀取）比對版本，
+ * 版本相同才用本機快取。否則「這台電腦匯入、那支手機看不到」會發生。
+ * 快取鍵含專案 ID，切換帳號或專案不會誤用別人的名冊。
+ */
+const ROSTER_INDEX_KEY = `care.rosterIndex.${firebaseConfig.projectId}`;
+/** 尚未建立索引（退回逐份讀 students）時的短快取，避免匯入後久久看不到 */
+const ROSTER_FALLBACK_TTL = 2 * 60 * 1000;
 
-let rosterIndex: { at: number; rows: StudentIndexEntry[] } | null = null;
+interface RosterCache {
+  version: number;
+  at: number;
+  rows: StudentIndexEntry[];
+}
 
-function readCachedIndex(): { at: number; rows: StudentIndexEntry[] } | null {
+let rosterIndex: RosterCache | null = null;
+
+function readCachedIndex(): RosterCache | null {
   if (rosterIndex) return rosterIndex;
   try {
     const raw = localStorage.getItem(ROSTER_INDEX_KEY);
     if (!raw) return null;
-    rosterIndex = JSON.parse(raw) as { at: number; rows: StudentIndexEntry[] };
+    rosterIndex = JSON.parse(raw) as RosterCache;
     return rosterIndex;
   } catch {
     return null;
   }
 }
 
-/**
- * 取得搜尋用的名冊。
- * 優先讀聚合索引（1000 人約 2 次讀取）；尚未建立索引時才退回逐份讀 students。
- */
-async function loadRosterIndex(): Promise<StudentIndexEntry[]> {
-  const cached = readCachedIndex();
-  if (cached && Date.now() - cached.at < ROSTER_INDEX_TTL) return cached.rows;
-
-  const indexRows = await readRosterIndex({ db: db() });
-  const rows: StudentIndexEntry[] = indexRows
-    ? indexRows.map((row) => ({ ...row, window: [] }))
-    : (await getDocs(collection(db(), COL.students))).docs.map((d) => ({
-        id: d.id,
-        studentNo: (d.get("studentNo") as string) ?? "",
-        name: (d.get("name") as string) ?? "",
-        className: (d.get("className") as string) ?? "",
-        seatNo: (d.get("seatNo") as number | null) ?? null,
-        active: d.get("active") !== false,
-        window: [],
-      }));
-
-  rosterIndex = { at: Date.now(), rows };
+function writeCachedIndex(cache: RosterCache): void {
+  rosterIndex = cache;
   try {
-    localStorage.setItem(ROSTER_INDEX_KEY, JSON.stringify(rosterIndex));
+    localStorage.setItem(ROSTER_INDEX_KEY, JSON.stringify(cache));
   } catch {
     /* 配額不足時只用記憶體快取即可 */
   }
+}
+
+/**
+ * 取得搜尋用的名冊。
+ * 1. 讀 meta（1 次）→ 版本與快取相同就直接用快取
+ * 2. 版本不同 → 重讀分片（1000 人約 2 次讀取）
+ * 3. 還沒有索引 → 退回逐份讀 students，並只短暫快取
+ */
+async function loadRosterIndex(): Promise<StudentIndexEntry[]> {
+  const cached = readCachedIndex();
+  const meta = await readRosterIndexMeta({ db: db() });
+
+  if (meta) {
+    if (cached && cached.version === meta.version) return cached.rows;
+    const indexRows = (await readRosterIndex({ db: db() })) ?? [];
+    const rows = indexRows.map((row) => ({ ...row, window: [] }));
+    writeCachedIndex({ version: meta.version, at: Date.now(), rows });
+    return rows;
+  }
+
+  // 尚未建立索引：逐份讀，短快取（2 分鐘），讓剛匯入的名冊很快就看得到
+  if (
+    cached &&
+    cached.version === 0 &&
+    Date.now() - cached.at < ROSTER_FALLBACK_TTL
+  ) {
+    return cached.rows;
+  }
+  const rows: StudentIndexEntry[] = (
+    await getDocs(collection(db(), COL.students))
+  ).docs.map((d) => ({
+    id: d.id,
+    studentNo: (d.get("studentNo") as string) ?? "",
+    name: (d.get("name") as string) ?? "",
+    className: (d.get("className") as string) ?? "",
+    seatNo: (d.get("seatNo") as number | null) ?? null,
+    active: d.get("active") !== false,
+    window: [],
+  }));
+  writeCachedIndex({ version: 0, at: Date.now(), rows });
   return rows;
 }
 

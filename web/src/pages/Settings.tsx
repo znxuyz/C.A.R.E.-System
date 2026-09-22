@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
+import { USE_MOCK, firebaseConfig } from "../firebase/client.ts";
 import { Callout, Field, Panel } from "../components/ui.tsx";
 import { useToast } from "../components/toast.tsx";
 import type {
@@ -48,6 +49,9 @@ const WINDOW_PRESETS = [
  * 每次調整都寫入稽核軌跡；已發出的警示會留存當時的參數快照，
  * 因此日後調參不影響既有案件的可追溯性。
  */
+const projectId = USE_MOCK ? "（示範模式）" : firebaseConfig.projectId;
+const dataSource = USE_MOCK ? "MOCK" : "FIRESTORE";
+
 export function Settings() {
   const toast = useToast();
   const [form, setForm] = useState<SystemSettings | null>(null);
@@ -68,6 +72,8 @@ export function Settings() {
   const [fileInfo, setFileInfo] = useState<string | null>(null);
   const [importMode, setImportMode] = useState<"MERGE" | "REPLACE">("MERGE");
   const [rebuilding, setRebuilding] = useState(false);
+  /** 讀取失敗的原因（權限不足、離線等）；不顯示的話會被誤認為「資料不見了」 */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [existing, setExisting] = useState<ExistingStudent[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -98,7 +104,10 @@ export function Settings() {
           ),
         ),
       )
-      .catch(() => setLocations([]));
+      .catch((error) => {
+        setLocations([]);
+        setLoadError(error instanceof Error ? error.message : "地點載入失敗");
+      });
   }, []);
 
   useEffect(loadLocations, [loadLocations]);
@@ -107,7 +116,12 @@ export function Settings() {
     void api
       .infractionTypes()
       .then((rows) => setTypes(rows))
-      .catch(() => setTypes([]));
+      .catch((error) => {
+        setTypes([]);
+        setLoadError(
+          error instanceof Error ? error.message : "違規類型載入失敗",
+        );
+      });
   }, []);
 
   useEffect(loadTypes, [loadTypes]);
@@ -116,7 +130,10 @@ export function Settings() {
     void api
       .rosterSnapshot()
       .then(setExisting)
-      .catch(() => setExisting([]));
+      .catch((error) => {
+        setExisting([]);
+        setLoadError(error instanceof Error ? error.message : "名冊載入失敗");
+      });
   }, []);
 
   useEffect(loadRoster, [loadRoster]);
@@ -268,6 +285,11 @@ export function Settings() {
     if (fileInput.current) fileInput.current.value = "";
   };
 
+  const clearLocalCache = () => {
+    api.clearLocalCache();
+    window.location.reload();
+  };
+
   const rebuildIndex = async () => {
     setRebuilding(true);
     try {
@@ -351,8 +373,35 @@ export function Settings() {
     }
   };
 
+  const rosterCount = existing?.filter((student) => student.active).length ?? 0;
+
   return (
     <>
+      {loadError && (
+        <Callout tone="warning">
+          <span aria-hidden="true">⚠️</span>
+          <span>
+            <strong>資料讀取失敗</strong>：{loadError}
+            <br />
+            這代表「讀不到」而不是「資料不見」。常見原因：此帳號尚未授權（請以
+            管理者帳號到「帳號管理」授權）、安全規則未發布，或網路不通。
+            <button
+              className="btn btn--sm"
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                setLoadError(null);
+                load();
+                loadLocations();
+                loadTypes();
+                loadRoster();
+              }}
+            >
+              重新載入
+            </button>
+          </span>
+        </Callout>
+      )}
+
       <Panel
         title="再犯偵測"
         hint={`目前規則：${form.recidivismWindowDays} 天內累計 ${form.recidivismThreshold} 次即觸發`}
@@ -968,6 +1017,19 @@ export function Settings() {
             </span>
           </div>
 
+          <Callout>
+            <span aria-hidden="true">☁️</span>
+            <span>
+              資料存放於 <strong>Firebase 專案 {projectId}</strong>
+              ，全平台共用 —— 任何裝置、任何已授權帳號看到的都是同一份名冊。
+              <br />
+              目前在校學生 <strong>{rosterCount}</strong> 人
+              {dataSource === "MOCK" &&
+                "（示範模式：這裡的資料是模擬的，不會寫入雲端）"}
+              。若某台裝置顯示的人數不同，按下方「清除本機快取」即可強制重讀。
+            </span>
+          </Callout>
+
           <div className="btn-row">
             <button
               className="btn"
@@ -975,6 +1037,9 @@ export function Settings() {
               onClick={() => void rebuildIndex()}
             >
               {rebuilding ? "重建中…" : "重建搜尋索引"}
+            </button>
+            <button className="btn" onClick={clearLocalCache}>
+              清除本機快取並重新載入
             </button>
             <span className="small muted">
               搜尋是讀「名冊索引」而非逐份讀學生資料，可大幅減少 Firebase
