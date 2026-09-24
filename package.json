@@ -15,7 +15,8 @@
     "emulators": "firebase emulators:start --import=./firestore-emulator-data --export-on-exit",
     "seed": "node seed/seed.mjs",
     "seed:demo": "node seed/seed.mjs --demo",
-    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes"
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
+    "deploy:rules:sa": "node scripts/deploy-firestore.mjs"
   },
   "engines": {
     "node": ">=20"

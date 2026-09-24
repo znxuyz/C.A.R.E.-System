@@ -114,9 +114,22 @@ npm run deploy:rules           # 規則 + 6 筆索引一次送上
 2. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
    - Name：`FIREBASE_SERVICE_ACCOUNT`
    - Secret：**整份 JSON 內容**（連大括號一起貼）
-3. 完成。之後只要 `firestore.rules` 或 `firestore.indexes.json` 有變動並推上
+3. 確認該服務帳戶有這兩個角色（Google Cloud Console → **IAM** → 找到
+   `firebase-adminsdk-…@<專案>.iam.gserviceaccount.com` → 編輯 → 新增角色）：
+   - **Firebase Rules Admin**（`roles/firebaserules.admin`）→ 發布安全規則
+   - **Cloud Datastore Index Admin**（`roles/datastore.indexAdmin`）→ 建立索引
+4. 完成。之後只要 `firestore.rules` 或 `firestore.indexes.json` 有變動並推上
    `main`，[`deploy-rules.yml`](../.github/workflows/deploy-rules.yml)
    就會自動發布規則與索引；也可以在 Actions 分頁手動執行（workflow_dispatch）。
+
+> **為什麼不是直接跑 `firebase deploy`**：firebase-tools 在部署前一定會呼叫
+> serviceusage 檢查 API 是否啟用（`src/deploy/firestore/prepare.ts` 的 `ensure()`，
+> 在判斷 `--only` 之前就執行，且沒有環境變數可跳過），那需要
+> `serviceusage.services.get` 權限，Firebase 產生的服務帳戶預設沒有，
+> CI 會以 `403 Permission denied to get service` 失敗。
+> 因此改用 [`scripts/deploy-firestore.mjs`](../scripts/deploy-firestore.mjs)
+> 直接呼叫 Firebase Rules API 與 Firestore Admin API，權限需求最小、也不必裝 CLI。
+> 本機要用同一條路徑時：`GOOGLE_APPLICATION_CREDENTIALS=金鑰.json npm run deploy:rules:sa`。
 
 > 未設定這個 secret 時流程會自動略過並留一則警告，CI 不會變紅 ——
 > 但就要自己記得用方式 A 或 B 發布。

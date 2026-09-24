@@ -16,8 +16,11 @@
   「Missing or insufficient permissions」。規則測試要涵蓋新的寫入形狀，
   不能只測原本那一種。
 - 規則推上 `main` 後由 `.github/workflows/deploy-rules.yml` 自動發布
-  （需 repo secret `FIREBASE_SERVICE_ACCOUNT`）；未設定時該流程略過，
-  需改用 `npm run deploy:rules` 或在 Console 貼上。
+  （需 repo secret `FIREBASE_SERVICE_ACCOUNT`，且該服務帳戶需有
+  `roles/firebaserules.admin` 與 `roles/datastore.indexAdmin`）；
+  未設定時該流程略過，需改用 `npm run deploy:rules` 或在 Console 貼上。
+- CI 走 `scripts/deploy-firestore.mjs`（直接呼叫 REST API），不用 firebase-tools：
+  後者部署前必定呼叫 serviceusage 檢查 API，需要多餘權限且無法跳過。
 - 每次改規則都要跑 `npm run test:rules`（Firestore 模擬器）。
 - 發布規則不會刪除資料；權限錯誤代表「寫入被拒絕」或「讀取被拒絕」，
   面向使用者的訊息必須講清楚這一點（見 `web/src/lib/errors.ts`）。

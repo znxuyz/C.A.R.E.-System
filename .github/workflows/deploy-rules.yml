@@ -37,6 +37,13 @@ jobs:
           if [ -z "$KEY" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::warning title=尚未自動發布::未設定 FIREBASE_SERVICE_ACCOUNT，已略過。請手動執行 npm run deploy:rules，或依 docs/firebase-setup.md 設定該 secret。"
+            # 執行摘要會顯示在 Actions 頁面最上方，避免「綠勾卻什麼都沒做」被誤會成已發布
+            {
+              echo "## ⏭️ 已略過：規則未發布"
+              echo ""
+              echo "repo secret \`FIREBASE_SERVICE_ACCOUNT\` 尚未設定，本次沒有發布任何規則。"
+              echo "設定方式見 \`docs/firebase-setup.md\` 的「方式 C」。"
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
@@ -44,7 +51,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.guard.outputs.configured == 'true'
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: 寫入服務帳戶金鑰
         if: steps.guard.outputs.configured == 'true'
@@ -54,9 +61,21 @@ jobs:
           printf '%s' "$KEY" > "$RUNNER_TEMP/sa.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
+      # 不用 firebase-tools：它在部署前一定會呼叫 serviceusage 檢查 API 是否啟用
+      # （且無法跳過），那需要 serviceusage.services.get 權限，Firebase 產生的
+      # 服務帳戶預設沒有，CI 會以 403 失敗。改為直接呼叫 REST API。
       - name: 發布 firestore.rules 與索引
         if: steps.guard.outputs.configured == 'true'
-        run: npx --yes firebase-tools@latest deploy --only firestore:rules,firestore:indexes --non-interactive
+        run: node scripts/deploy-firestore.mjs
+
+      - name: 記錄發布結果
+        if: steps.guard.outputs.configured == 'true'
+        run: |
+          {
+            echo "## ✅ 已發布 firestore.rules 與索引"
+            echo ""
+            echo "專案：$(node -p "require('./.firebaserc').projects.default")"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 清除金鑰
         if: always()
