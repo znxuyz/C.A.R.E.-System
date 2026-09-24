@@ -113,7 +113,12 @@ npm run deploy:rules           # 規則 + 6 筆索引一次送上
 1. Console → ⚙️ **專案設定 → 服務帳戶 → 產生新的私密金鑰**，下載 JSON
 2. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
    - Name：`FIREBASE_SERVICE_ACCOUNT`
-   - Secret：**整份 JSON 內容**（連大括號一起貼）
+   - Secret：**下載的 .json 檔案內容**（用記事本開啟後全選複製，連大括號一起貼）
+
+   > ⚠️ 同一頁上方的「**Admin SDK 設定程式碼片段**」（`var admin = require(...)`
+   > 那段，可切換 Node.js／Java／Python／Go）**不是金鑰**，貼錯會讓部署失敗。
+   > 要貼的是按「產生新的私密金鑰」後下載的檔案，內容以 `{` 開頭、
+   > 含 `"type": "service_account"` 與 `"private_key"`。
 3. 確認該服務帳戶有這兩個角色（Google Cloud Console → **IAM** → 找到
    `firebase-adminsdk-…@<專案>.iam.gserviceaccount.com` → 編輯 → 新增角色）：
    - **Firebase Rules Admin**（`roles/firebaserules.admin`）→ 發布安全規則（必要）

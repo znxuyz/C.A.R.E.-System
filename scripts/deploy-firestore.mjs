@@ -163,7 +163,33 @@ async function deployIndexes(token, projectId, indexes) {
 const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 if (!keyPath) die('未設定 GOOGLE_APPLICATION_CREDENTIALS');
 
-const credentials = JSON.parse(await readFile(keyPath, 'utf8'));
+const raw = (await readFile(keyPath, 'utf8')).trim();
+if (!raw.startsWith('{')) {
+  // 常見誤貼：Firebase 主控台「服務帳戶」頁面上方的 Admin SDK 範例程式碼
+  die(
+    '金鑰內容不是 JSON。\n' +
+      (/require\(|admin\.initializeApp|import /.test(raw)
+        ? '看起來貼到的是「Admin SDK 設定程式碼片段」那段範例程式碼。\n'
+        : '') +
+      '請改貼「產生新的私密金鑰」下載的 .json 檔案內容，\n' +
+      '內容以 { 開頭，並包含 "type": "service_account" 與 "private_key"。',
+  );
+}
+
+let credentials;
+try {
+  credentials = JSON.parse(raw);
+} catch (error) {
+  die(`金鑰 JSON 無法解析：${error instanceof Error ? error.message : error}`);
+}
+
+for (const field of ['client_email', 'private_key']) {
+  if (!credentials[field]) {
+    die(
+      `金鑰缺少必要欄位 "${field}"。請確認貼的是完整的服務帳戶 JSON 檔內容。`,
+    );
+  }
+}
 const projectId =
   process.env.FIREBASE_PROJECT_ID ||
   JSON.parse(await readFile(resolve(ROOT, '.firebaserc'), 'utf8')).projects
