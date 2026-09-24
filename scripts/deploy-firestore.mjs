@@ -118,13 +118,19 @@ async function deployRules(token, projectId, source) {
   return rulesetName;
 }
 
-/** 建立複合索引；已存在（409）視為成功 */
+/**
+ * 建立複合索引；已存在（409）視為成功。
+ *
+ * 權限不足（403）不讓整個流程失敗：規則已經發布成功，索引是獨立的一件事，
+ * 而且多半在初次設定時就手動建好了。改為回報並提示要補哪個角色。
+ */
 async function deployIndexes(token, projectId, indexes) {
   const base =
     `https://firestore.googleapis.com/v1/projects/${projectId}` +
     '/databases/(default)/collectionGroups';
   let created = 0;
   let existing = 0;
+  let denied = 0;
 
   for (const index of indexes) {
     const { collectionGroup, queryScope = 'COLLECTION', fields } = index;
@@ -142,13 +148,16 @@ async function deployIndexes(token, projectId, indexes) {
       existing += 1;
       continue;
     }
+    if (result.status === 403) {
+      denied += 1;
+      continue;
+    }
+    // 400 等錯誤代表索引定義本身有問題，那是該修的設定，照樣中止
     die(
-      `建立索引失敗（${collectionGroup}，${result.status}）：${message}\n` +
-        '若為權限不足，請在 IAM 給這個服務帳戶\n' +
-        '「Cloud Datastore Index Admin」（roles/datastore.indexAdmin）角色。',
+      `建立索引失敗（${collectionGroup}，${result.status}）：${message}`,
     );
   }
-  return { created, existing };
+  return { created, existing, denied };
 }
 
 const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -174,5 +183,35 @@ console.log(`✔ 安全規則已發布：${rulesetName}`);
 
 const summary = await deployIndexes(token, projectId, indexes ?? []);
 console.log(
-  `✔ 索引：新建 ${summary.created} 筆、已存在 ${summary.existing} 筆`,
+  `✔ 索引：新建 ${summary.created} 筆、已存在 ${summary.existing} 筆` +
+    (summary.denied ? `、無權限略過 ${summary.denied} 筆` : ''),
 );
+
+if (summary.denied) {
+  console.log(
+    '\n⚠ 規則已發布，但有索引因權限不足未建立。\n' +
+      '  要讓索引也自動化，請在 Google Cloud Console → IAM 給這個服務帳戶\n' +
+      '  「Cloud Datastore Index Admin」（roles/datastore.indexAdmin）角色；\n' +
+      '  或依 docs/firebase-setup.md 在主控台手動建立索引（只需一次）。',
+  );
+}
+
+// 給 GitHub Actions 的執行摘要（本機執行時 GITHUB_STEP_SUMMARY 不存在，自動略過）
+if (process.env.GITHUB_STEP_SUMMARY) {
+  const { appendFileSync } = await import('node:fs');
+  appendFileSync(
+    process.env.GITHUB_STEP_SUMMARY,
+    [
+      '## ✅ 安全規則已發布',
+      '',
+      `專案：\`${projectId}\``,
+      `Ruleset：\`${rulesetName}\``,
+      '',
+      `索引：新建 ${summary.created} 筆、已存在 ${summary.existing} 筆` +
+        (summary.denied
+          ? `、**無權限略過 ${summary.denied} 筆**（需 roles/datastore.indexAdmin）`
+          : ''),
+      '',
+    ].join('\n'),
+  );
+}

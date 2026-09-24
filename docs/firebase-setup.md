@@ -116,8 +116,10 @@ npm run deploy:rules           # 規則 + 6 筆索引一次送上
    - Secret：**整份 JSON 內容**（連大括號一起貼）
 3. 確認該服務帳戶有這兩個角色（Google Cloud Console → **IAM** → 找到
    `firebase-adminsdk-…@<專案>.iam.gserviceaccount.com` → 編輯 → 新增角色）：
-   - **Firebase Rules Admin**（`roles/firebaserules.admin`）→ 發布安全規則
+   - **Firebase Rules Admin**（`roles/firebaserules.admin`）→ 發布安全規則（必要）
    - **Cloud Datastore Index Admin**（`roles/datastore.indexAdmin`）→ 建立索引
+     （選用；沒有的話流程仍會發布規則，只會提示索引被略過，
+     索引可依 §2 方式 A 在主控台手動建立，通常只需做一次）
 4. 完成。之後只要 `firestore.rules` 或 `firestore.indexes.json` 有變動並推上
    `main`，[`deploy-rules.yml`](../.github/workflows/deploy-rules.yml)
    就會自動發布規則與索引；也可以在 Actions 分頁手動執行（workflow_dispatch）。
