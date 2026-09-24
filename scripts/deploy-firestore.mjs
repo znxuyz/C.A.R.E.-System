@@ -103,16 +103,29 @@ async function deployRules(token, projectId, source) {
     `https://firebaserules.googleapis.com/v1/${releaseName}`,
     { method: 'PATCH', body: JSON.stringify({ release: { name: releaseName, rulesetName } }) },
   );
-  if (patched.ok) return rulesetName;
+  if (!patched.ok) {
+    const posted = await api(
+      token,
+      `https://firebaserules.googleapis.com/v1/projects/${projectId}/releases`,
+      { method: 'POST', body: JSON.stringify({ name: releaseName, rulesetName }) },
+    );
+    if (!posted.ok) {
+      die(
+        `切換 release 失敗（${posted.status}）：${JSON.stringify(posted.body)}`,
+      );
+    }
+  }
 
-  const posted = await api(
+  // 回頭確認線上生效的確實是這份 ruleset —— 否則「發布成功」只是我們自己說的
+  const active = await api(
     token,
-    `https://firebaserules.googleapis.com/v1/projects/${projectId}/releases`,
-    { method: 'POST', body: JSON.stringify({ name: releaseName, rulesetName }) },
+    `https://firebaserules.googleapis.com/v1/${releaseName}`,
   );
-  if (!posted.ok) {
+  if (!active.ok || active.body.rulesetName !== rulesetName) {
     die(
-      `切換 release 失敗（${posted.status}）：${JSON.stringify(posted.body)}`,
+      '發布後驗證失敗：線上生效的 ruleset 與剛建立的不一致\n' +
+        `  期望：${rulesetName}\n` +
+        `  實際：${active.body?.rulesetName ?? `讀取失敗（${active.status}）`}`,
     );
   }
   return rulesetName;
