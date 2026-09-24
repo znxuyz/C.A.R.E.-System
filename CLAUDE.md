@@ -11,8 +11,10 @@
 
 ## 安全規則的發布
 
-- 程式新增集合時，`firestore.rules` 必須同步更新，否則線上會出現
-  「Missing or insufficient permissions」。
+- 程式新增集合，**或改變寫入的欄位與狀態值**（例如新增可建立的 `status`），
+  `firestore.rules` 都必須同步更新，否則線上會出現
+  「Missing or insufficient permissions」。規則測試要涵蓋新的寫入形狀，
+  不能只測原本那一種。
 - 規則推上 `main` 後由 `.github/workflows/deploy-rules.yml` 自動發布
   （需 repo secret `FIREBASE_SERVICE_ACCOUNT`）；未設定時該流程略過，
   需改用 `npm run deploy:rules` 或在 Console 貼上。

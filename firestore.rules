@@ -209,7 +209,12 @@ service cloud.firestore {
       allow create: if isStaff()
         && request.resource.data.studentId is string
         && isSchoolDate(request.resource.data.occurredOn)
-        && request.resource.data.status == 'OPEN'
+        // 發卡的案件以 OPEN 起始（待回收紙本）；
+        // 期間內第一次只記錄勸導時沒有紙本要回收，直接以 DONE 結案。
+        // 但「已發卡卻一開始就標記為結案」不允許，避免略過回收流程。
+        && request.resource.data.status in ['OPEN', 'DONE']
+        && (request.resource.data.status == 'OPEN'
+            || request.resource.data.cardIssued == false)
         && request.resource.data.countsTowardRecidivism is bool
         && (request.resource.data.consumedByAlertId == null
             || request.resource.data.consumedByAlertId is string)

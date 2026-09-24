@@ -193,6 +193,39 @@ describe('生教組長', () => {
     );
   });
 
+  it('期間內第一次只記錄勸導：可直接以 DONE 建立（沒有紙本要回收）', async () => {
+    const db = as(STAFF_UID, STAFF_EMAIL);
+    const base = {
+      studentId: 'stu_1', studentNo: '1140101', studentName: '王小明',
+      classId: 'cls_701', className: '七年一班',
+      typeCode: 'RUN_IN_CORRIDOR', typeName: '走廊奔跑', paperCard: 'SAFETY',
+      occurredOn: '2026-09-21', occurredAt: '2026-09-21T02:00:00.000Z', periodNo: 2,
+      locationCode: 'CORRIDOR_2F', locationName: '二樓走廊',
+      recordedBy: { uid: STAFF_UID, name: '王淑芬' },
+      countsTowardRecidivism: true, consumedByAlertId: null,
+    };
+    await assertSucceeds(
+      setDoc(doc(db, 'infractions', 'inf_advice'), {
+        ...base, status: 'DONE', cardIssued: false, paperCardLabel: null,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }),
+    );
+    // 已發卡卻一開始就標記結案 → 拒絕（不得略過回收流程）
+    await assertFails(
+      setDoc(doc(db, 'infractions', 'inf_skip'), {
+        ...base, status: 'DONE', cardIssued: true,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }),
+    );
+    // 免記／撤銷不可作為建立時的狀態
+    await assertFails(
+      setDoc(doc(db, 'infractions', 'inf_exempt'), {
+        ...base, status: 'EXEMPTED', cardIssued: false,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
   it('不可偽造登錄者', async () => {
     const db = as(STAFF_UID, STAFF_EMAIL);
     await assertFails(
