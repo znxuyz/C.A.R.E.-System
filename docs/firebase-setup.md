@@ -172,7 +172,19 @@ Console → Firestore Database → **索引** 分頁，6 筆索引狀態都變�
 ### 3-2. 確認 Pages 來源
 
 **Settings → Pages → Build and deployment → Source** 必須是 **「GitHub Actions」**。
-若是「Deploy from a branch」，首頁會變成 README 而不是系統畫面。
+
+若設成「Deploy from a branch」，GitHub 會另外啟用內建的 Jekyll 部署
+（Actions 分頁會看到 **`pages build and deployment`** 這個流程），
+把 repo 根目錄的 `README.md` 轉成網頁發布 —— **兩套部署互相覆蓋，誰後跑誰贏**：
+
+- 推送有動到 `web/**` 時，本專案的流程通常較晚完成 → 看到系統畫面
+- 推送只動到其他檔案時，只有 Jekyll 會跑 → **首頁變成 README**
+
+症狀就是「有時正常、有時變成 README」。把 Source 改成「GitHub Actions」後，
+內建的 Jekyll 部署會完全停止，只剩本專案的流程在部署，網站內容才會穩定。
+
+> 怎麼確認已經改好：Actions 分頁**不再出現**新的
+> `pages build and deployment` 執行紀錄。
 
 ### 3-3. 觸發部署
 
@@ -382,7 +394,7 @@ npm run seed
 
 | 症狀 | 原因與解法 |
 |---|---|
-| 首頁顯示 README | Pages Source 不是「GitHub Actions」→ §3-2；改完強制重新整理（Ctrl/Cmd+Shift+R） |
+| 首頁顯示 README | Pages Source 不是「GitHub Actions」→ §3-2。判斷方式：Actions 分頁若有 `pages build and deployment` 的執行紀錄，就是它把 README 蓋上去的。改完強制重新整理（Ctrl/Cmd+Shift+R） |
 | 登入跳錯 `auth/unauthorized-domain` | 網域沒加入授權清單 → §3-4 |
 | 一直顯示「尚未授權」 | `accessGrants` 文件 ID 與登入信箱不符（需全小寫）、或 `active` 不是 true → §4 |
 | 操作時出現 `Missing or insufficient permissions` | 規則尚未部署 → `npm run deploy:rules`；或該帳號未被授權 |
