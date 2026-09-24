@@ -16,6 +16,7 @@ on:
       - 'firestore.rules'
       - 'firestore.indexes.json'
       - '.firebaserc'
+      - 'scripts/deploy-firestore.mjs'
       - '.github/workflows/deploy-rules.yml'
   workflow_dispatch:
 
