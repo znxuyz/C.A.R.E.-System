@@ -12,6 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # vite.config.js 會蓋掉 vite.config.ts（Vite 優先讀 .js），
+      # 導致設定改了卻沒生效；web/src 的 .js 則是過期的編譯殘留。
+      - name: 檢查編譯殘留
+        run: |
+          stale=$(find web/src -name '*.js' 2>/dev/null; ls web/vite.config.js 2>/dev/null || true)
+          if [ -n "$stale" ]; then
+            echo "::error title=發現編譯殘留::以下檔案會覆蓋 TypeScript 原始碼，請刪除："
+            echo "$stale"
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

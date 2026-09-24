@@ -12,6 +12,19 @@ export interface NavItem {
   group: string;
 }
 
+/** 以台北時間顯示建置時間（月/日 時:分） */
+function buildStamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
 export function AppShell({
   session,
   items,
@@ -80,6 +93,10 @@ export function AppShell({
           <button className="btn btn--ghost" onClick={onSignOut} style={{ justifyContent: 'flex-start', padding: 0 }}>
             登出
           </button>
+          {/* 版本標記：用來確認眼前畫面是不是最新部署（而非瀏覽器快取） */}
+          <div className="build-tag" title={`建置時間 ${__BUILD_INFO__.at}`}>
+            版本 {__BUILD_INFO__.sha}・{buildStamp(__BUILD_INFO__.at)}
+          </div>
         </div>
       </aside>
 

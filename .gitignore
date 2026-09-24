@@ -30,3 +30,7 @@ web/.env.local
 
 # test
 coverage/
+
+# 編譯殘留：web/src 一律為 TypeScript，且 vite.config.js 會蓋掉 .ts 設定
+web/vite.config.js
+web/src/**/*.js
