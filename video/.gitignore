@@ -1,0 +1,8 @@
+# 產出物不入版控（可由腳本重新產生）
+scenes/
+work/
+audio/
+cards/*.png
+cards/*.html
+*.mp4
+*.wav
