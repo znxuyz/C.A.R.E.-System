@@ -137,12 +137,13 @@ await scene('s05-log-second', async (page) => {
 await scene('s06-first-offenders', async (page) => {
   await openApp(page, '#/admin');
   await nav(page, '初犯名單');
-  // 清單是非同步載入的：多等一會兒，裁切起點才躲得開「載入中…」
+  // 兩件事：清單是非同步載入的，多等一會兒，裁切起點才躲得開「載入中…」；
+  // 而 Playwright 只在畫面有變化時寫入影格，結尾的靜止畫面不會進檔案，
+  // 所以素材長度靠「慢速捲動」撐出來，不能靠 waitForTimeout。
   await page.waitForTimeout(3200);
-  await scrollTo(page, 420, { duration: 1400 });
-  await page.waitForTimeout(2600);
-  await scrollTo(page, 0, { duration: 1200 });
-  await page.waitForTimeout(2600);
+  await scrollTo(page, 420, { duration: 5000 });
+  await page.waitForTimeout(1200);
+  await scrollTo(page, 0, { duration: 4000 });
 });
 
 /* 7. 待回收紙本 → 已回收 */
@@ -158,12 +159,13 @@ await scene('s07-cases', async (page) => {
 await scene('s08-alerts', async (page) => {
   await openApp(page, '#/admin');
   await nav(page, '再犯警示');
-  // 同上：等清單真的畫出來
+  // 同上：等清單真的畫出來，結尾用捲動收，不要停在靜止畫面
   await page.waitForTimeout(3400);
   await clickAt(page, page.locator('button', { hasText: '依據' }).first(), { settle: 1500 });
-  await page.waitForTimeout(2600);
-  await scrollTo(page, 240, { duration: 1200 });
-  await page.waitForTimeout(2400);
+  await page.waitForTimeout(1800);
+  await scrollTo(page, 240, { duration: 4000 });
+  await page.waitForTimeout(1000);
+  await scrollTo(page, 0, { duration: 3500 });
 });
 
 /* 9. 安全觀察員值勤台 */

@@ -29,6 +29,18 @@ python3 compose.py       # 產生 care-system-intro.mp4
 需求：ffmpeg（含 libass）、Playwright 的 Chromium、Python 3 + numpy、
 以及一套中文字型（本片使用 WenQuanYi Zen Hei）。
 
+重跑時可用 `REUSE_SEGMENTS=1` 沿用已切好的片段、`REUSE_MASTER=1` 連母片一起沿用
+（只重燒字幕與配樂，約一分鐘）。
+
+## 兩個會重複踩到的坑
+
+- **`compose.py` 的時間軸是 `(起點, 終點)`，不是 `(起點, 長度)`。**
+  只改起點會把那一段變短。
+- **Playwright 只在畫面有變化時寫入影格**，所以錄影結尾的 `waitForTimeout`
+  不會變成素材；要靠捲動或游標移動把長度撐出來。素材不夠長時 `ffmpeg -t`
+  會默默產出較短的片段，`compose.py` 因此改以實測長度排字幕
+  （否則誤差會一路累積，片尾可以差到二十秒）。
+
 ## 內容結構
 
 | 段落 | 內容 |
