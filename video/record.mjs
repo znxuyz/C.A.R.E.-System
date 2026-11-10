@@ -137,9 +137,12 @@ await scene('s05-log-second', async (page) => {
 await scene('s06-first-offenders', async (page) => {
   await openApp(page, '#/admin');
   await nav(page, '初犯名單');
-  await page.waitForTimeout(2200);
+  // 清單是非同步載入的：多等一會兒，裁切起點才躲得開「載入中…」
+  await page.waitForTimeout(3200);
   await scrollTo(page, 420, { duration: 1400 });
-  await page.waitForTimeout(2400);
+  await page.waitForTimeout(2600);
+  await scrollTo(page, 0, { duration: 1200 });
+  await page.waitForTimeout(2600);
 });
 
 /* 7. 待回收紙本 → 已回收 */
@@ -155,8 +158,11 @@ await scene('s07-cases', async (page) => {
 await scene('s08-alerts', async (page) => {
   await openApp(page, '#/admin');
   await nav(page, '再犯警示');
-  await page.waitForTimeout(1800);
+  // 同上：等清單真的畫出來
+  await page.waitForTimeout(3400);
   await clickAt(page, page.locator('button', { hasText: '依據' }).first(), { settle: 1500 });
+  await page.waitForTimeout(2600);
+  await scrollTo(page, 240, { duration: 1200 });
   await page.waitForTimeout(2400);
 });
 
