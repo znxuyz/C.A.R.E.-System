@@ -91,6 +91,9 @@ def normalize():
     for index, (kind, name, start, end, _subs) in enumerate(TIMELINE):
         out = os.path.join(WORK, f'seg{index:02d}.mp4')
         dur = round(end - start, 3)
+        if os.path.exists(out) and os.environ.get('REUSE_SEGMENTS') == '1':
+            paths.append((out, dur))
+            continue
         if kind == 'card':
             src = os.path.join(CARDS, f'{name}.png')
             frames = int(dur * FPS)
@@ -129,8 +132,10 @@ def write_subtitles(offsets):
         ('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, '
          'BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, '
          'BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding'),
-        (f'Style: Sub,{FONT},52,&H00FFFFFF,&H000000FF,&HC8101418,&H96000000,'
-         '-1,0,0,0,100,100,0.6,0,3,0,0,2,160,160,74,1'),
+        # BorderStyle=3 時 Outline 是「底框內距」，必須大於 0；
+        # OutlineColour 用 &HAABBGGRR，alpha 0x28 ≒ 不透明度 84%，淺色介面上也讀得到
+        (f'Style: Sub,{FONT},50,&H00FFFFFF,&H000000FF,&H28121417,&H64000000,'
+         '-1,0,0,0,100,100,0.6,0,3,9,0,2,170,170,72,1'),
         '', '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
     ]
@@ -146,8 +151,12 @@ def write_subtitles(offsets):
     return path
 
 
-def build_video(segments, subs_path):
-    """以 xfade 串接並燒錄字幕"""
+def build_master(segments):
+    """以 xfade 串接成母片（不含字幕），已存在就沿用"""
+    out = os.path.join(WORK, 'master.mp4')
+    if os.path.exists(out) and os.environ.get('REUSE_MASTER') == '1':
+        print('  （沿用既有母片）')
+        return out
     inputs = []
     for path, _dur in segments:
         inputs += ['-i', path]
@@ -163,14 +172,23 @@ def build_video(segments, subs_path):
         current = label
         total = round(total + segments[i][1] - XFADE, 3)
 
-    escaped = subs_path.replace(':', r'\:')
-    filters.append(f"{current}ass='{escaped}'[v]")
-    out = os.path.join(WORK, 'video.mp4')
+    filters.append(f'{current}null[v]')
     run(['ffmpeg', '-v', 'error', '-y', *inputs,
          '-filter_complex', ';'.join(filters), '-map', '[v]',
-         '-c:v', 'libx264', '-preset', 'medium', '-crf', '20',
+         '-c:v', 'libx264', '-preset', 'medium', '-crf', '19',
          '-pix_fmt', 'yuv420p', '-r', str(FPS), out])
     return out, total
+
+
+def burn_subtitles(master, subs_path):
+    """把字幕燒上母片（單獨一道，之後調字幕不必重跑串接）"""
+    out = os.path.join(WORK, 'video.mp4')
+    escaped = subs_path.replace(':', r'\:')
+    run(['ffmpeg', '-v', 'error', '-y', '-i', master,
+         '-vf', f"ass='{escaped}'",
+         '-c:v', 'libx264', '-preset', 'medium', '-crf', '20',
+         '-pix_fmt', 'yuv420p', out])
+    return out
 
 
 def main():
@@ -187,8 +205,10 @@ def main():
     print('2/4 產生字幕')
     subs = write_subtitles(offsets)
 
-    print('3/4 串接轉場並燒錄字幕（較花時間）')
-    video, measured = build_video(segments, subs)
+    print('3/4 串接轉場（較花時間）')
+    master, measured = build_master(segments)
+    print('    燒錄字幕')
+    video = burn_subtitles(master, subs)
 
     print('4/4 合成配樂並混音')
     os.makedirs(AUDIO, exist_ok=True)
