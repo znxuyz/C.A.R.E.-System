@@ -468,6 +468,19 @@ const buildHotspots = () => {
 export const mockApi = {
   progress: (studentId: string) => delay(store.progress(studentId)),
 
+  /** 示範模式的名冊快照：讓「系統設定 → 學生名冊」看得到實際人數與比對結果 */
+  rosterSnapshot: () =>
+    delay(
+      STUDENTS.map((s) => ({
+        id: s.id,
+        studentNo: s.studentNo,
+        name: s.name,
+        className: s.className,
+        seatNo: s.seatNo as number | null,
+        active: true,
+      })),
+    ),
+
   infractionTypes: () => delay(TYPES),
   locations: () => delay(LOCATIONS),
 

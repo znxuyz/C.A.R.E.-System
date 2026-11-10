@@ -84,6 +84,16 @@ def run(cmd, **kw):
     return result
 
 
+def probe_duration(path):
+    """實際產出的長度。-t 指定的只是上限：素材不夠長時會比指定值短，
+    直接拿指定值去排字幕會一路累積誤差，到片尾可以差到二十秒。"""
+    out = subprocess.run(
+        ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+         '-of', 'csv=p=0', path],
+        capture_output=True, text=True)
+    return round(float(out.stdout.strip()), 3)
+
+
 def normalize():
     """裁切並轉為統一規格；標題卡加上緩慢推近，避免靜止畫面太死板"""
     os.makedirs(WORK, exist_ok=True)
@@ -92,7 +102,7 @@ def normalize():
         out = os.path.join(WORK, f'seg{index:02d}.mp4')
         dur = round(end - start, 3)
         if os.path.exists(out) and os.environ.get('REUSE_SEGMENTS') == '1':
-            paths.append((out, dur))
+            paths.append((out, probe_duration(out)))
             continue
         if kind == 'card':
             src = os.path.join(CARDS, f'{name}.png')
@@ -111,8 +121,10 @@ def normalize():
         cmd += ['-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '19',
                 '-pix_fmt', 'yuv420p', out]
         run(cmd)
-        paths.append((out, dur))
-        print(f'  ✔ seg{index:02d} {name} {dur:.1f}s')
+        actual = probe_duration(out)
+        paths.append((out, actual))
+        note = '' if abs(actual - dur) < 0.05 else f'（素材僅 {actual:.1f}s）'
+        print(f'  ✔ seg{index:02d} {name} {actual:.1f}s {note}')
     return paths
 
 
@@ -123,7 +135,7 @@ def ass_time(seconds):
     return f'{h}:{m:02d}:{s:05.2f}'
 
 
-def write_subtitles(offsets):
+def write_subtitles(offsets, durations):
     """依各段在成品中的起點換算字幕絕對時間"""
     lines = [
         '[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 1920', 'PlayResY: 1080',
@@ -141,7 +153,13 @@ def write_subtitles(offsets):
     ]
     for index, (_kind, _name, _start, _end, subs) in enumerate(TIMELINE):
         base = offsets[index]
+        limit = durations[index]
         for rel_start, rel_end, text in subs:
+            # 素材比預期短時，字幕不能溢出到下一段
+            rel_end = min(rel_end, limit)
+            if rel_end - rel_start < 0.6:
+                print(f'  ! seg{index:02d} 字幕被素材長度擠掉：{text}')
+                continue
             lines.append(
                 f'Dialogue: 0,{ass_time(base + rel_start)},{ass_time(base + rel_end)},'
                 f'Sub,,0,0,0,,{{\\fad(220,220)}}{text}')
@@ -156,7 +174,7 @@ def build_master(segments):
     out = os.path.join(WORK, 'master.mp4')
     if os.path.exists(out) and os.environ.get('REUSE_MASTER') == '1':
         print('  （沿用既有母片）')
-        return out
+        return out, probe_duration(out)
     inputs = []
     for path, _dur in segments:
         inputs += ['-i', path]
@@ -203,7 +221,7 @@ def main():
     print(f'  成品長度約 {total:.1f} 秒（{int(total // 60)}:{int(total % 60):02d}）')
 
     print('2/4 產生字幕')
-    subs = write_subtitles(offsets)
+    subs = write_subtitles(offsets, [d for _p, d in segments])
 
     print('3/4 串接轉場（較花時間）')
     master, measured = build_master(segments)

@@ -1052,7 +1052,7 @@ export const api = {
 
   /** 目前名冊（比對新舊名冊用；只取比對需要的欄位） */
   async rosterSnapshot(): Promise<ExistingStudent[]> {
-    if (USE_MOCK) return [];
+    if (USE_MOCK) return mockApi.rosterSnapshot();
     // 有索引就用索引（幾次讀取），沒有才退回逐份讀
     const indexRows = await readRosterIndex({ db: db() });
     if (indexRows) return indexRows.map((row) => ({ ...row }));

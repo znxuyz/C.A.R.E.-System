@@ -188,7 +188,9 @@ await scene('s11-student', async (page) => {
   await input.click();
   await input.type('八年二班', { delay: 150 });
   await page.waitForTimeout(1600);
-  await clickAt(page, page.locator('a', { hasText: '查看歷程' }).first(), { settle: 2000 });
+  // 挑有紀錄的學生（1130205），否則歷程會是空的，看不出這頁的用處
+  const row = page.locator('tr', { hasText: '1130205' }).first();
+  await clickAt(page, row.locator('a', { hasText: '查看歷程' }).first(), { settle: 2000 });
   await scrollTo(page, 420, { duration: 1300 });
   await page.waitForTimeout(2000);
 });
