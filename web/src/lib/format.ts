@@ -100,3 +100,21 @@ export const ALERT_STATUS_TONE: Record<AlertStatus, string> = {
   CLOSED: 'good',
   DISMISSED: 'neutral',
 };
+
+/**
+ * 回溯期間的文案。
+ * 回溯天數可依違規類型分別設定，一旦有分項設定就不能再寫死「15 天」，
+ * 否則畫面講的天數會跟實際判定不符。
+ */
+export const windowDaysLabel = (
+  settings?: {
+    recidivismWindowDays: number;
+    recidivismWindowDaysByType?: Record<string, number>;
+  } | null,
+): string => {
+  const base = settings?.recidivismWindowDays ?? 15;
+  const all = [base, ...Object.values(settings?.recidivismWindowDaysByType ?? {})];
+  const min = Math.min(...all);
+  const max = Math.max(...all);
+  return min === max ? `${base} 天` : `${min}–${max} 天（依違規類型）`;
+};

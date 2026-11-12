@@ -18,12 +18,18 @@
  *     此舉同時讓演算法**具幂等性**（重複評估不會加罰）。
  *  4. **狀態門檻**：違規一經登錄即成立並計入；
  *     只有「班級活動優先豁免」與「誤報撤銷」不計入。
+ *  5. **分項回溯天數**：回溯天數可依違規類型分別設定（例如走廊奔跑看 15 天、
+ *     口出穢言看 30 天）。每一筆違規各自用它那一類的天數從 `asOf` 往前推，
+ *     判斷自己還在不在視窗內；**門檻次數仍是合併計算的一個數字**。
+ *     回報的 `windowStart` 取其中最長的那個視窗，代表「所有計入的違規
+ *     都落在這個範圍內」。
  */
 
-import { isWithinWindow, recidivismWindow } from './dates.js';
+import { addDays, assertSchoolDate, isWithinWindow } from './dates.js';
 import {
   INFRACTION_STATUS,
   type InfractionStatus,
+  type InfractionTypeCode,
   type IsoTimestamp,
   type RecidivismAlert,
   type SchoolDate,
@@ -41,22 +47,63 @@ export interface CountableInfraction {
   studentId: string;
   occurredOn: SchoolDate;
   typeName: string;
+  /** 分項回溯天數要靠它對照；舊資料沒有就沿用預設天數 */
+  typeCode?: InfractionTypeCode;
   status: InfractionStatus;
   countsTowardRecidivism: boolean;
   consumedByAlertId: string | null;
 }
 
+/** 分項回溯天數：`{ 違規類型代碼: 天數 }`，沒列到的沿用預設 */
+export type WindowDaysByType = Readonly<Record<InfractionTypeCode, number>>;
+
 export interface RecidivismConfig {
-  /** 回溯天數（含當天），預設 15 */
+  /** 預設回溯天數（含當天），預設 15 */
   windowDays: number;
   /** 觸發門檻，預設 3 */
   threshold: number;
+  /** 分項覆寫；未設定的類型沿用 `windowDays` */
+  windowDaysByType?: WindowDaysByType;
+}
+
+/** 某類型實際適用的回溯天數（沒設定或設定無效時沿用預設） */
+export function windowDaysFor(
+  typeCode: InfractionTypeCode | undefined,
+  config: Pick<RecidivismConfig, 'windowDays' | 'windowDaysByType'>,
+): number {
+  const override = typeCode ? config.windowDaysByType?.[typeCode] : undefined;
+  return Number.isInteger(override) && (override as number) >= 1
+    ? (override as number)
+    : config.windowDays;
+}
+
+/** 某類型在 `asOf` 當日的視窗起點 */
+export function windowStartFor(
+  asOf: SchoolDate,
+  typeCode: InfractionTypeCode | undefined,
+  config: Pick<RecidivismConfig, 'windowDays' | 'windowDaysByType'>,
+): SchoolDate {
+  return addDays(assertSchoolDate(asOf), -(windowDaysFor(typeCode, config) - 1));
+}
+
+/**
+ * 所有類型中最長的回溯天數。
+ * 快取要保留到最長的那個視窗為止，否則長天數的類型會被短天數誤刪。
+ */
+export function maxWindowDays(
+  config: Pick<RecidivismConfig, 'windowDays' | 'windowDaysByType'>,
+): number {
+  return Object.values(config.windowDaysByType ?? {}).reduce(
+    (max, days) => (Number.isInteger(days) && days > max ? days : max),
+    config.windowDays,
+  );
 }
 
 export interface RecidivismEvaluation {
   studentId: string;
   /** 是否達到門檻、須發出警示 */
   triggered: boolean;
+  /** 本次判定涵蓋的最長回溯天數（分項設定時取其中最長者） */
   windowDays: number;
   threshold: number;
   windowStart: SchoolDate;
@@ -69,17 +116,24 @@ export interface RecidivismEvaluation {
   counted: CountableInfraction[];
 }
 
-/** 單筆違規是否計入指定視窗 */
+/**
+ * 單筆違規是否計入 `asOf` 當日的判定。
+ * 視窗起點依這一筆自己的類型決定，終點一律是 `asOf`。
+ */
 export function isCountable(
   infraction: CountableInfraction,
-  windowStart: SchoolDate,
-  windowEnd: SchoolDate,
+  asOf: SchoolDate,
+  config: Pick<RecidivismConfig, 'windowDays' | 'windowDaysByType'>,
 ): boolean {
   return (
     infraction.countsTowardRecidivism &&
     infraction.consumedByAlertId === null &&
     COUNTABLE_STATUSES.includes(infraction.status) &&
-    isWithinWindow(infraction.occurredOn, windowStart, windowEnd)
+    isWithinWindow(
+      infraction.occurredOn,
+      windowStartFor(asOf, infraction.typeCode, config),
+      asOf,
+    )
   );
 }
 
@@ -98,11 +152,14 @@ export function evaluateRecidivism(input: {
   if (!Number.isInteger(config.threshold) || config.threshold < 1) {
     throw new RangeError(`threshold 須為正整數，收到：${config.threshold}`);
   }
-  const { windowStart, windowEnd } = recidivismWindow(asOf, config.windowDays);
+  // 回報用的視窗取最長的那個：所有計入的違規都落在這個範圍內
+  const windowEnd = assertSchoolDate(asOf);
+  const outerDays = maxWindowDays(config);
+  const windowStart = addDays(windowEnd, -(outerDays - 1));
 
   const counted = infractions
     .filter((item) => item.studentId === studentId)
-    .filter((item) => isCountable(item, windowStart, windowEnd))
+    .filter((item) => isCountable(item, windowEnd, config))
     // 去重：防止呼叫端傳入重複文件
     .filter((item, index, all) => all.findIndex((c) => c.id === item.id) === index)
     .sort((a, b) =>
@@ -119,7 +176,7 @@ export function evaluateRecidivism(input: {
   return {
     studentId,
     triggered,
-    windowDays: config.windowDays,
+    windowDays: outerDays,
     threshold: config.threshold,
     windowStart,
     windowEnd,

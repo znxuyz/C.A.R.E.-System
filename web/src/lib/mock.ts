@@ -25,8 +25,29 @@ import type {
   WatchlistRow,
 } from "./types.ts";
 
-const WINDOW_DAYS = 15;
 const THRESHOLD = 3;
+
+/**
+ * 回溯天數可依違規類型分別設定，示範模式也照同一套規則算，
+ * 這樣在後台改了分項天數，清單與計數會立刻跟著變。
+ */
+const windowDaysOf = (typeCode?: string): number => {
+  const override = typeCode
+    ? mockSettings.recidivismWindowDaysByType[typeCode]
+    : undefined;
+  return Number.isInteger(override) && (override as number) >= 1
+    ? (override as number)
+    : mockSettings.recidivismWindowDays;
+};
+/** 某一筆違規自己那一類的視窗起點 */
+const windowStartOf = (asOf: string, typeCode?: string): string =>
+  shift(asOf, -(windowDaysOf(typeCode) - 1));
+/** 最長的回溯天數（快取保留與對外顯示的視窗都用它） */
+const widestWindowDays = (): number =>
+  Object.values(mockSettings.recidivismWindowDaysByType).reduce(
+    (max, days) => (Number.isInteger(days) && days > max ? days : max),
+    mockSettings.recidivismWindowDays,
+  );
 /** 期間內第幾次起才發反思卡（與正式環境的 settings.cardFromOffense 一致） */
 const CARD_FROM_OFFENSE = 2;
 
@@ -50,6 +71,7 @@ export const MOCK_SESSION: Session = {
 /** 示範模式的設定與帳號清單（存在記憶體，重新整理即重置） */
 const mockSettings: SystemSettings = {
   recidivismWindowDays: 15,
+  recidivismWindowDaysByType: {},
   recidivismThreshold: 3,
   cardFromOffense: CARD_FROM_OFFENSE,
   observerPeriods: 5,
@@ -292,16 +314,15 @@ class MockStore {
     if (row.reasons.length === 0) row.status = "LIFTED";
   }
 
-  /** 與後端相同規則：15 天內未認列、未免記/撤銷的違規次數 */
+  /** 與後端相同規則：視窗內未認列、未免記/撤銷的違規次數（天數依類型） */
   countWindow(studentId: string, asOf = this.today): number {
-    const windowStart = shift(asOf, -(WINDOW_DAYS - 1));
     return this.infractions.filter(
       (item) =>
         item.studentId === studentId &&
         item.countsTowardRecidivism &&
         item.consumedByAlertId === null &&
         (item.status === "OPEN" || item.status === "DONE") &&
-        item.occurredOn >= windowStart &&
+        item.occurredOn >= windowStartOf(asOf, item.typeCode) &&
         item.occurredOn <= asOf,
     ).length;
   }
@@ -312,7 +333,7 @@ class MockStore {
       count,
       threshold: THRESHOLD,
       shortfall: Math.max(0, THRESHOLD - count),
-      windowStart: shift(asOf, -(WINDOW_DAYS - 1)),
+      windowStart: shift(asOf, -(widestWindowDays() - 1)),
       windowEnd: asOf,
     };
   }
@@ -348,9 +369,9 @@ class MockStore {
       studentName: student.name,
       className: student.className,
       triggeredAt: nowIso(),
-      windowStart: shift(this.today, -(WINDOW_DAYS - 1)),
+      windowStart: shift(this.today, -(widestWindowDays() - 1)),
       windowEnd: this.today,
-      windowDays: WINDOW_DAYS,
+      windowDays: widestWindowDays(),
       count: counted.length,
       threshold: THRESHOLD,
       status: "ASSIGNED",
@@ -400,14 +421,13 @@ class MockStore {
   }
 
   evaluate(studentId: string, asOf: string): AlertRow | null {
-    const windowStart = shift(asOf, -(WINDOW_DAYS - 1));
     const counted = this.infractions.filter(
       (item) =>
         item.studentId === studentId &&
         item.countsTowardRecidivism &&
         item.consumedByAlertId === null &&
         (item.status === "OPEN" || item.status === "DONE") &&
-        item.occurredOn >= windowStart &&
+        item.occurredOn >= windowStartOf(asOf, item.typeCode) &&
         item.occurredOn <= asOf,
     );
     if (counted.length < THRESHOLD) return null;
@@ -601,10 +621,9 @@ export const mockApi = {
 
   /** 比對規則與正式環境一致（見 core/domain/studentSearch.ts）：學號／姓名／班級 */
   firstOffenders: () => {
-    const windowStart = shift(store.today, -(WINDOW_DAYS - 1));
     const byStudent = new Map<string, MockInfraction[]>();
     for (const item of store.infractions) {
-      if (item.occurredOn < windowStart) continue;
+      if (item.occurredOn < windowStartOf(store.today, item.typeCode)) continue;
       if (item.status === "VOIDED" || item.status === "EXEMPTED") continue;
       if (!item.countsTowardRecidivism || item.consumedByAlertId) continue;
       byStudent.set(item.studentId, [
@@ -617,7 +636,10 @@ export const mockApi = {
         .filter((items) => items.length === 1)
         .map((items) => {
           const item = items[0]!;
-          const expiresOn = shift(item.occurredOn, WINDOW_DAYS - 1);
+          const expiresOn = shift(
+            item.occurredOn,
+            windowDaysOf(item.typeCode) - 1,
+          );
           return {
             studentId: item.studentId,
             studentNo: item.studentNo,

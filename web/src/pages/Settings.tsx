@@ -10,6 +10,7 @@ import type {
   PaperCard,
   SystemSettings,
 } from "../lib/types.ts";
+import { windowDaysLabel } from "../lib/format.ts";
 import { readRosterFile } from "../lib/rosterFile.ts";
 import {
   diffRoster,
@@ -158,6 +159,32 @@ export function Settings() {
 
   const patch = (next: Partial<SystemSettings>) =>
     setForm({ ...form, ...next });
+  /**
+   * 設定（或清掉）某個違規類型的回溯天數。
+   * 空字串＝沿用預設，因此是把這個 key 從 map 裡移掉，而不是寫 0。
+   */
+  const setWindowDaysForType = (code: string, raw: string) => {
+    const next = { ...form.recidivismWindowDaysByType };
+    const days = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(days)) {
+      delete next[code];
+    } else {
+      next[code] = Math.min(365, Math.max(1, Math.round(days)));
+    }
+    patch({ recidivismWindowDaysByType: next });
+  };
+
+  /** 面板文案：有分項設定時不能再寫死單一天數 */
+  const windowLabel = windowDaysLabel(form);
+
+  /** 摘要用：只列出有特別設定的類型 */
+  const customWindowSummary = (types ?? [])
+    .filter((type) => form.recidivismWindowDaysByType[type.code] !== undefined)
+    .map(
+      (type) => `${type.name} ${form.recidivismWindowDaysByType[type.code]} 天`,
+    )
+    .join("、");
+
   const togglePeriod = (period: number) => {
     const next = form.observerPeriodNumbers.includes(period)
       ? form.observerPeriodNumbers.filter((p) => p !== period)
@@ -375,15 +402,30 @@ export function Settings() {
   const save = async () => {
     setBusy(true);
     try {
+      /*
+       * 刪掉的違規類型不該在設定裡留下孤兒 key（會一路累積到上限）。
+       * 類型清單還沒載入（null）時不動它，免得把設定誤清空。
+       */
+      const windowDaysByType =
+        types === null
+          ? form.recidivismWindowDaysByType
+          : Object.fromEntries(
+              Object.entries(form.recidivismWindowDaysByType).filter(([code]) =>
+                types.some((type) => type.code === code),
+              ),
+            );
       await api.updateSettings({
         recidivismWindowDays: form.recidivismWindowDays,
+        recidivismWindowDaysByType: windowDaysByType,
         cardFromOffense: form.cardFromOffense,
         recidivismThreshold: form.recidivismThreshold,
         observerPeriodNumbers: form.observerPeriodNumbers,
         carryOverUnfinished: form.carryOverUnfinished,
         publicBoard: form.publicBoard,
       });
-      setSaved(form);
+      const next = { ...form, recidivismWindowDaysByType: windowDaysByType };
+      setForm(next);
+      setSaved(next);
       toast.push("設定已儲存，之後登錄的違規即依新參數判定");
     } catch (error) {
       toast.push(`儲存失敗：${describeFirestoreError(error)}`, "error");
@@ -423,24 +465,27 @@ export function Settings() {
 
       <Panel
         title="再犯偵測"
-        hint={`目前規則：${form.recidivismWindowDays} 天內累計 ${form.recidivismThreshold} 次即觸發`}
+        hint={`目前規則：${windowLabel}內累計 ${form.recidivismThreshold} 次即觸發`}
       >
         <div className="stack">
-          <div className="form-grid">
+          <div className="form-grid form-grid--aligned">
             <Field
-              label="回溯天數（含當天）"
-              hint="往前算幾天。填 15 代表「今天＋前 14 天」這段期間內的違規才會被計入。1–365 天，預設 15 天。"
+              label="預設回溯天數（含當天）"
+              hint="往前算幾天。填 15 代表「今天＋前 14 天」內的違規才計入。1–365 天。"
             >
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={form.recidivismWindowDays}
-                onChange={(event) =>
-                  patch({ recidivismWindowDays: Number(event.target.value) })
-                }
-              />
-              <div className="btn-row" style={{ marginTop: 6 }}>
+              <div className="field__control">
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={form.recidivismWindowDays}
+                  onChange={(event) =>
+                    patch({ recidivismWindowDays: Number(event.target.value) })
+                  }
+                />
+                <span className="field__unit">天</span>
+              </div>
+              <div className="btn-row">
                 {WINDOW_PRESETS.map((preset) => (
                   <button
                     key={preset.days}
@@ -459,38 +504,107 @@ export function Settings() {
             </Field>
             <Field
               label="第幾次起發反思卡"
-              hint="填 2 代表：期間內第一次只做記錄勸導，不用寫反思卡、下課也不受影響；第二次起才發卡並凍結當日自由下課。填 1 則每次都發卡。"
+              hint="填 2 代表第一次只記錄勸導，不用寫反思卡、下課照常；第二次起才發卡。填 1 則每次都發。"
             >
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={form.cardFromOffense}
-                onChange={(event) =>
-                  patch({ cardFromOffense: Number(event.target.value) })
-                }
-              />
+              <div className="field__control">
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={form.cardFromOffense}
+                  onChange={(event) =>
+                    patch({ cardFromOffense: Number(event.target.value) })
+                  }
+                />
+                <span className="field__unit">次起</span>
+              </div>
             </Field>
             <Field
               label="觸發次數"
-              hint="同一位學生在上述期間內累計到第幾次違規，就發出再犯警示。填 3 代表第 3 次時觸發。1–20 次，預設 3 次。"
+              hint="同一位學生在期間內累計到第幾次，就發出再犯警示。填 3 代表第 3 次觸發。1–20 次。"
             >
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={form.recidivismThreshold}
-                onChange={(event) =>
-                  patch({ recidivismThreshold: Number(event.target.value) })
-                }
-              />
+              <div className="field__control">
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={form.recidivismThreshold}
+                  onChange={(event) =>
+                    patch({ recidivismThreshold: Number(event.target.value) })
+                  }
+                />
+                <span className="field__unit">次</span>
+              </div>
             </Field>
+          </div>
+
+          <div className="field">
+            <span className="field__label">各違規類型的回溯天數</span>
+            <span className="field__hint">
+              某些行為想看得久一點時才需要調整；留空＝沿用上面的預設{" "}
+              {form.recidivismWindowDays} 天。每一筆違規各自用它那一類的天數回推，
+              <strong>累計次數仍是全部合併計算</strong>。
+            </span>
+            {types === null ? (
+              <span className="field__hint">載入中…</span>
+            ) : types.length === 0 ? (
+              <span className="field__hint">
+                尚未建立違規類型，請先於下方「違規類型與反思卡」建立。
+              </span>
+            ) : (
+              <ul className="rule-list">
+                {types.map((type) => {
+                  const custom = form.recidivismWindowDaysByType[type.code];
+                  return (
+                    <li className="rule-list__row" key={type.code}>
+                      <span className="rule-list__name">
+                        <span aria-hidden="true">{type.icon ?? "📋"}</span>
+                        {type.name}
+                      </span>
+                      <span className="rule-list__control">
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          inputMode="numeric"
+                          value={custom ?? ""}
+                          placeholder={String(form.recidivismWindowDays)}
+                          aria-label={`${type.name}的回溯天數`}
+                          onChange={(event) =>
+                            setWindowDaysForType(
+                              type.code,
+                              event.target.value,
+                            )
+                          }
+                        />
+                        <span className="field__unit">天</span>
+                      </span>
+                      <span className="rule-list__state">
+                        {custom === undefined ? (
+                          "沿用預設"
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            onClick={() =>
+                              setWindowDaysForType(type.code, "")
+                            }
+                          >
+                            改回預設
+                          </button>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
           <Callout tone="warning">
             <span aria-hidden="true">📐</span>
             <span>
               目前規則：同一位學生在{" "}
-              <strong>{form.recidivismWindowDays} 天內（含當天）</strong>累計到{" "}
+              <strong>{windowLabel}（含當天）</strong>內累計到{" "}
               <strong>第 {form.recidivismThreshold} 次</strong>
               違規時，系統會發出再犯警示，並自動把他排入
               <strong>安全觀察員追蹤清單</strong>（值勤一日下課{" "}
@@ -501,8 +615,15 @@ export function Settings() {
               在那之前只做記錄勸導，學生不必寫東西、下課照常。
               <br />
               計入的是<strong>違規登錄的筆數</strong>
-              （走廊奔跑與口出穢言合併計算）；已被某次警示認列的違規會標記為
+              （各類型合併計算）；已被某次警示認列的違規會標記為
               「已認列」，不會對下一波處分重複計數。
+              {customWindowSummary && (
+                <>
+                  <br />
+                  分項回溯天數：{customWindowSummary}
+                  ；其餘類型沿用 {form.recidivismWindowDays} 天。
+                </>
+              )}
             </span>
           </Callout>
 

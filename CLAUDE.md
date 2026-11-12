@@ -49,3 +49,9 @@ npm run build         # 建置
 期間內第一次只記錄勸導，不發卡也不管制）、值勤節次（預設第 1–5 節）、
 紙本未回收是否續管制、公開看板開關。三處驗證需同步：
 `core/services/settings.ts`、`firestore.rules`、`pages/Settings.tsx`。
+
+**回溯天數可依違規類型分別設定**（`settings.recidivismWindowDaysByType`，
+`{類型代碼: 天數}`，沒列到的沿用預設）。判定時每一筆違規各自用它那一類的天數
+從當日回推，**門檻次數仍是全部合併計算**；對外顯示的視窗取其中最長者。
+安全規則沒有迴圈，無法逐一驗證 map 內每個值的範圍，因此只擋型別與筆數（≤50），
+值的 1–365 由 `settings.ts` 寫入時驗證並於 `loadSettings` 讀取時再過濾一次。

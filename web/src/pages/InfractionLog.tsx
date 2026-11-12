@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
 import { describeFirestoreError } from "../lib/errors.ts";
+import { windowDaysLabel } from "../lib/format.ts";
 import { useToast } from "../components/toast.tsx";
 import {
   Badge,
@@ -154,8 +155,8 @@ export function InfractionLog() {
     };
   }, [matched]);
 
-  // 回溯天數可於後台調整，畫面文案一律跟著設定走（預設 15 天）
-  const windowDays = settings?.recidivismWindowDays ?? 15;
+  // 回溯天數可於後台調整、也可依違規類型分開設定，文案一律跟著設定走
+  const windowDays = windowDaysLabel(settings);
   const cardFromOffense = settings?.cardFromOffense ?? 2;
   /** 若現在送出，這會是視窗內的第幾次；據此預告會不會發卡 */
   const nextOffenseIndex = (windowCount ?? 0) + 1;
@@ -235,7 +236,7 @@ export function InfractionLog() {
                 {result.triggered ? "⚠️" : result.count >= 2 ? "⚠️" : "ℹ️"}
               </span>
               <span>
-                該生 {windowDays} 天內累計 <strong>{result.count}</strong> 次
+                該生 {windowDays}內累計 <strong>{result.count}</strong> 次
                 {result.triggered ? (
                   <>
                     ，<strong>已達再犯門檻</strong>
@@ -347,7 +348,7 @@ export function InfractionLog() {
                     {inactive && <Badge tone="critical">已畢業／轉出</Badge>}
                     {windowCount !== null && windowCount > 0 && (
                       <Badge tone={windowCount >= 2 ? "critical" : "warning"}>
-                        {windowDays} 天內 {windowCount} 次
+                        {windowDays}內 {windowCount} 次
                       </Badge>
                     )}
                   </>
@@ -479,8 +480,8 @@ export function InfractionLog() {
             </button>
             <span className="small muted">
               {matched && !willIssueCard
-                ? `送出後：僅記錄勸導（期間內第 ${nextOffenseIndex} 次）→ 不發反思卡、下課不受影響 → 自動計算 ${windowDays} 天內再犯次數`
-                : `送出後：凍結當日自由下課 → 發放紙本反思卡 → 自動計算 ${windowDays} 天內再犯次數`}
+                ? `送出後：僅記錄勸導（期間內第 ${nextOffenseIndex} 次）→ 不發反思卡、下課不受影響 → 自動計算 ${windowDays}內再犯次數`
+                : `送出後：凍結當日自由下課 → 發放紙本反思卡 → 自動計算 ${windowDays}內再犯次數`}
             </span>
           </div>
         </div>

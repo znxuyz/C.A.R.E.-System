@@ -314,11 +314,23 @@ export interface AccessGrant {
 export interface RecidivismWindowEntry {
   infractionId: string;
   occurredOn: SchoolDate;
+  /**
+   * 違規類型代碼。回溯天數可依類型分別設定，判斷這筆還在不在視窗內時
+   * 要用它自己那一類的天數。舊資料沒有這個欄位 → 沿用預設天數。
+   */
+  typeCode?: InfractionTypeCode;
 }
 
 export interface SystemSettings {
   /** 再犯偵測回溯天數（含當天）— 預設 15 */
   recidivismWindowDays: number;
+  /**
+   * 分項回溯天數：`{ 違規類型代碼: 天數 }`。
+   * 只放要特別設定的類型，沒列到的沿用 `recidivismWindowDays`。
+   * 例如走廊奔跑看 15 天、口出穢言看 30 天 —— 判定時每一筆違規各自用
+   * 它那一類的天數回推，門檻次數仍然是合併計算的一個數字。
+   */
+  recidivismWindowDaysByType: Record<InfractionTypeCode, number>;
   /** 觸發門檻次數 — 預設 3 */
   recidivismThreshold: number;
   /**
@@ -350,6 +362,7 @@ export interface SystemSettings {
 
 export const DEFAULT_SETTINGS: SystemSettings = {
   recidivismWindowDays: 15,
+  recidivismWindowDaysByType: {},
   recidivismThreshold: 3,
   cardFromOffense: 2,
   observerPeriods: 5,

@@ -401,6 +401,56 @@ describe('系統管理者', () => {
     );
   });
 
+  it('分項回溯天數：map 可存，型別不對或筆數爆量被拒', async () => {
+    const db = as(ADMIN_UID, ADMIN_EMAIL);
+    const base = {
+      recidivismWindowDays: 15, recidivismThreshold: 3, observerPeriods: 5,
+      updatedAt: serverTimestamp(),
+    };
+    await assertSucceeds(
+      setDoc(doc(db, 'settings', 'system'), {
+        ...base,
+        recidivismWindowDaysByType: { RUN_IN_CORRIDOR: 15, FOUL_LANGUAGE: 30 },
+      }),
+    );
+    // 沒帶這個欄位也要能存（後加欄位，舊版前端仍可寫入）
+    await assertSucceeds(setDoc(doc(db, 'settings', 'system'), base));
+    // 不是 map（寫成陣列或數字）→ 拒絕
+    await assertFails(
+      setDoc(doc(db, 'settings', 'system'), {
+        ...base, recidivismWindowDaysByType: [15, 30],
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db, 'settings', 'system'), {
+        ...base, recidivismWindowDaysByType: 30,
+      }),
+    );
+    // 筆數上限 50：擋住把設定文件當成資料表塞
+    const tooMany: Record<string, number> = {};
+    for (let i = 0; i < 51; i += 1) tooMany[`TYPE_${i}`] = 15;
+    await assertFails(
+      setDoc(doc(db, 'settings', 'system'), {
+        ...base, recidivismWindowDaysByType: tooMany,
+      }),
+    );
+  });
+
+  it('違規類型：管理者可增修與刪除，生教組不行', async () => {
+    const admin = as(ADMIN_UID, ADMIN_EMAIL);
+    const staff = as(STAFF_UID, STAFF_EMAIL);
+    await assertSucceeds(
+      setDoc(doc(admin, 'infractionTypes', 'LITTERING'), {
+        name: '亂丟垃圾', paperCard: 'SAFETY', paperCardLabel: '校園安全反思卡',
+        order: 3, countsTowardRecidivism: true,
+      }),
+    );
+    await assertSucceeds(deleteDoc(doc(admin, 'infractionTypes', 'LITTERING')));
+    await assertFails(
+      setDoc(doc(staff, 'infractionTypes', 'LITTERING'), { name: '亂丟垃圾' }),
+    );
+  });
+
   it('可讀稽核軌跡，但同樣不可修改', async () => {
     const db = as(ADMIN_UID, ADMIN_EMAIL);
     await assertSucceeds(getDoc(doc(db, 'auditLogs', 'log_1')));

@@ -160,7 +160,8 @@ service cloud.firestore {
 
     match /infractionTypes/{code} {
       allow read: if isStaff();
-      allow write: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /locations/{code} {
@@ -181,6 +182,15 @@ service cloud.firestore {
         && request.resource.data.recidivismWindowDays is int
         && request.resource.data.recidivismWindowDays >= 1
         && request.resource.data.recidivismWindowDays <= 365
+        /*
+         * 分項回溯天數 `{類型代碼: 天數}`：後加欄位，沒帶就沿用預設。
+         * 規則語言沒有迴圈，無法逐一驗證 map 內每個值的範圍，
+         * 這裡只擋型別與筆數；每個值的 1–365 由 services/settings.ts
+         * 寫入時驗證，並於 loadSettings 讀取時再過濾一次壞值。
+         */
+        && (!('recidivismWindowDaysByType' in request.resource.data)
+            || (request.resource.data.recidivismWindowDaysByType is map
+                && request.resource.data.recidivismWindowDaysByType.size() <= 50))
         // 發卡起算次數為後加欄位：沒帶就沿用預設，有帶則檢查範圍
         && (!('cardFromOffense' in request.resource.data)
             || (request.resource.data.cardFromOffense is int

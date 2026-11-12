@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api.ts";
-import { formatDate } from "../lib/format.ts";
+import { formatDate, windowDaysLabel } from "../lib/format.ts";
 import { Badge, Callout, EmptyState, Panel } from "../components/ui.tsx";
 import { describeFirestoreError } from "../lib/errors.ts";
 import type { FirstOffenderRow, SystemSettings } from "../lib/types.ts";
@@ -38,7 +38,7 @@ export function FirstOffenders() {
 
   useEffect(load, [load]);
 
-  const windowDays = settings?.recidivismWindowDays ?? 15;
+  const windowDays = windowDaysLabel(settings);
   const threshold = settings?.recidivismThreshold ?? 3;
   const cardFromOffense = settings?.cardFromOffense ?? 2;
 
@@ -47,7 +47,7 @@ export function FirstOffenders() {
       <Callout>
         <span aria-hidden="true">🌱</span>
         <span>
-          <strong>{windowDays} 天內只有 1 次紀錄</strong>的學生。依目前設定，第{" "}
+          <strong>{windowDays}內只有 1 次紀錄</strong>的學生。依目前設定，第{" "}
           {cardFromOffense} 次起才發反思卡，所以名單上的學生{" "}
           <strong>這一次只做了記錄與勸導</strong>，還沒有任何處分。
           <br />
@@ -83,7 +83,7 @@ export function FirstOffenders() {
         ) : rows.length === 0 ? (
           <EmptyState
             title="目前沒有初犯紀錄"
-            hint={`${windowDays} 天內尚無只登錄一次的學生。`}
+            hint={`${windowDays}內尚無只登錄一次的學生。`}
           />
         ) : (
           <div className="table-wrap">

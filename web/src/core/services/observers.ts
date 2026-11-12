@@ -16,7 +16,8 @@ import {
 } from 'firebase/firestore';
 import { COL } from '../firestore/paths.js';
 import { unlockDateForReviewReturn } from '../domain/caseRules.js';
-import { addDays, type SchoolCalendar } from '../domain/dates.js';
+import { type SchoolCalendar } from '../domain/dates.js';
+import { windowStartFor } from '../domain/recidivism.js';
 import {
   ASSIGNMENT_STATUS,
   RESTRICTION_REASONS,
@@ -187,7 +188,13 @@ export async function dismissAlert(
   const studentId = alertSnap.get('studentId') as string;
   const assignmentId = alertSnap.get('assignmentId') as string | undefined;
   const breakdown = (alertSnap.get('breakdown') as RecidivismWindowEntry[]) ?? [];
-  const windowStart = addDays(ctx.clock.today(), -(settings.recidivismWindowDays - 1));
+  // 撤銷警示要把當初認列的違規放回視窗：回溯天數可分項設定，
+  // 因此每一筆各自用它那一類的天數判斷「現在是否還在視窗內」。
+  const today = ctx.clock.today();
+  const windowConfig = {
+    windowDays: settings.recidivismWindowDays,
+    windowDaysByType: settings.recidivismWindowDaysByType,
+  };
   const studentRef = doc(ctx.db, COL.students, studentId);
 
   await runTransaction(ctx.db, async (tx) => {
@@ -195,7 +202,10 @@ export async function dismissAlert(
     const cached = (studentSnap.get('recidivismWindow') as RecidivismWindowEntry[]) ?? [];
     const restored = [
       ...cached,
-      ...breakdown.filter((item) => item.occurredOn >= windowStart),
+      ...breakdown.filter(
+        (item) =>
+          item.occurredOn >= windowStartFor(today, item.typeCode, windowConfig),
+      ),
     ].filter(
       (item, index, all) =>
         all.findIndex((other) => other.infractionId === item.infractionId) === index,

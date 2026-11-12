@@ -27,6 +27,11 @@ import {
   type SchoolCalendar,
 } from "../domain/dates.js";
 import {
+  maxWindowDays,
+  windowDaysFor,
+  windowStartFor,
+} from "../domain/recidivism.js";
+import {
   assertCanAnnotate,
   assertCanReturnPaper,
   shouldIssuePaperCard,
@@ -84,12 +89,25 @@ export interface LogInfractionResult {
   };
 }
 
-/** 保留在快取中的視窗紀錄（超出視窗者於每次寫入時順手清掉） */
+/**
+ * 保留在快取中的視窗紀錄（超出視窗者於每次寫入時順手清掉）。
+ *
+ * 回溯天數可依違規類型分別設定，所以每一筆要用**它自己那一類**的天數
+ * 從 `asOf` 往前推；用同一個起點一刀切會把長天數類型的紀錄提早刪掉。
+ * 舊資料沒有 `typeCode` → 沿用預設天數。
+ */
 function pruneWindow(
   entries: RecidivismWindowEntry[],
-  windowStart: SchoolDate,
+  asOf: SchoolDate,
+  settings: SystemSettings,
 ): RecidivismWindowEntry[] {
-  return entries.filter((entry) => entry.occurredOn >= windowStart);
+  const config = {
+    windowDays: settings.recidivismWindowDays,
+    windowDaysByType: settings.recidivismWindowDaysByType,
+  };
+  return entries.filter(
+    (entry) => entry.occurredOn >= windowStartFor(asOf, entry.typeCode, config),
+  );
 }
 
 /** 自訂卡名優先；沒設定時退回卡別的預設名稱 */
@@ -106,10 +124,13 @@ export async function logInfraction(
 ): Promise<LogInfractionResult> {
   const { db, clock } = ctx;
   const today = clock.today();
-  const windowStart = addDays(
-    input.occurredOn,
-    -(settings.recidivismWindowDays - 1),
-  );
+  const windowConfig = {
+    windowDays: settings.recidivismWindowDays,
+    windowDaysByType: settings.recidivismWindowDaysByType,
+  };
+  // 警示上記錄的是「涵蓋所有計入違規」的最外圈視窗（分項設定時取最長者）
+  const outerWindowDays = maxWindowDays(windowConfig);
+  const windowStart = addDays(input.occurredOn, -(outerWindowDays - 1));
   const dutyOn = nextSchoolDay(today, calendar);
   const counts = input.type.countsTowardRecidivism !== false;
 
@@ -140,11 +161,13 @@ export async function logInfraction(
 
     const cached = pruneWindow(
       (studentSnap.get("recidivismWindow") as RecidivismWindowEntry[]) ?? [],
-      windowStart,
+      input.occurredOn,
+      settings,
     );
     const entry: RecidivismWindowEntry = {
       infractionId: infractionRef.id,
       occurredOn: input.occurredOn,
+      typeCode: input.type.code,
     };
     const counted = counts ? [...cached, entry] : cached;
     const triggered = counted.length >= settings.recidivismThreshold;
@@ -220,7 +243,10 @@ export async function logInfraction(
         className: input.student.className,
         triggeredAt: serverTimestamp(),
         // 觸發當時的參數快照：日後調參不影響既有案件的可追溯性
-        windowDays: settings.recidivismWindowDays,
+        windowDays: outerWindowDays,
+        /** 預設天數與分項設定分開留存，申訴時看得出當時每一類各看幾天 */
+        defaultWindowDays: settings.recidivismWindowDays,
+        windowDaysByType: settings.recidivismWindowDaysByType,
         threshold: settings.recidivismThreshold,
         windowStart,
         windowEnd: input.occurredOn,
@@ -230,6 +256,8 @@ export async function logInfraction(
         breakdown: counted.map((item) => ({
           infractionId: item.infractionId,
           occurredOn: item.occurredOn,
+          typeCode: item.typeCode ?? null,
+          windowDays: windowDaysFor(item.typeCode, windowConfig),
         })),
         status: "ASSIGNED",
         assignmentId: assignmentRef.id,
@@ -456,10 +484,19 @@ export async function readProgress(
   windowEnd: SchoolDate;
 }> {
   const snap = await getDoc(doc(ctx.db, COL.students, studentId));
-  const windowStart = addDays(asOf, -(settings.recidivismWindowDays - 1));
+  const windowStart = addDays(
+    asOf,
+    -(
+      maxWindowDays({
+        windowDays: settings.recidivismWindowDays,
+        windowDaysByType: settings.recidivismWindowDaysByType,
+      }) - 1
+    ),
+  );
   const count = pruneWindow(
     (snap.get("recidivismWindow") as RecidivismWindowEntry[]) ?? [],
-    windowStart,
+    asOf,
+    settings,
   ).length;
   return {
     count,

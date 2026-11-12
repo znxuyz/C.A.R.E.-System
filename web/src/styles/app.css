@@ -675,6 +675,83 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
+/*
+ * 參數欄位的對齊。
+ * 各欄的說明文字長短不一，有的欄位還多一排快捷按鈕，直接並排會參差不齊。
+ * 每一格改成「標籤 → 控制項 → 彈性空白 → 說明」的直欄，
+ * 說明一律貼齊格子底部，輸入框則一律貼齊標籤下方。
+ */
+.form-grid--aligned > .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 100%;
+}
+.form-grid--aligned > .field .field__hint {
+  margin-top: auto;
+  padding-top: var(--space-1);
+  line-height: 1.6;
+}
+
+/* 輸入框＋單位（天／次）排成一列，單位不隨輸入框一起被拉寬 */
+.field__control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.field__control > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.field__unit {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ----------------------- 分項規則（各類型的天數） ----------------------- */
+
+.rule-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.rule-list__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 110px;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.rule-list__name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rule-list__control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.rule-list__control > input {
+  min-width: 0;
+}
+.rule-list__state {
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: right;
+  justify-self: end;
+}
+
 .choice-grid {
   display: grid;
   gap: var(--space-3);
@@ -1140,6 +1217,16 @@ textarea {
   .choice-grid,
   .type-grid {
     grid-template-columns: 1fr;
+  }
+  /* 手機上三欄塞不下：名稱整行，天數與狀態排第二行 */
+  .rule-list__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .rule-list__name {
+    grid-column: 1 / -1;
+  }
+  .form-grid--aligned > .field .field__hint {
+    margin-top: 0;
   }
   .grid--kpi {
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

@@ -11,6 +11,26 @@ import { COL, SETTINGS_DOC } from "../firestore/paths.js";
 import { DEFAULT_SETTINGS, type SystemSettings } from "../domain/types.js";
 import { auditDoc, type Ctx } from "./context.js";
 
+/**
+ * 分項回溯天數的清洗。
+ * 安全規則沒有迴圈，無法逐一檢查 map 裡每個值的範圍（只能擋住型別與筆數），
+ * 因此讀取時再過濾一次：壞掉的值直接丟掉、沿用預設天數，
+ * 絕不讓它變成 NaN 或 0 之類會讓視窗算錯的數字。
+ */
+function sanitizeWindowDaysByType(
+  value: unknown,
+): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, number> = {};
+  for (const [code, days] of Object.entries(value as Record<string, unknown>)) {
+    const num = Number(days);
+    if (code && Number.isInteger(num) && num >= 1 && num <= 365) {
+      out[code] = num;
+    }
+  }
+  return out;
+}
+
 export async function loadSettings(db: Ctx["db"]): Promise<SystemSettings> {
   const snap = await getDoc(doc(db, COL.settings, SETTINGS_DOC));
   if (!snap.exists()) return DEFAULT_SETTINGS;
@@ -18,12 +38,18 @@ export async function loadSettings(db: Ctx["db"]): Promise<SystemSettings> {
   return {
     ...DEFAULT_SETTINGS,
     ...data,
+    recidivismWindowDaysByType: sanitizeWindowDaysByType(
+      data.recidivismWindowDaysByType,
+    ),
     publicBoard: {
       ...DEFAULT_SETTINGS.publicBoard,
       ...(data.publicBoard ?? {}),
     },
   };
 }
+
+/** 分項回溯天數的筆數上限（安全規則只擋得住筆數，值的範圍在這裡與讀取時把關） */
+export const MAX_WINDOW_OVERRIDES = 50;
 
 const intInRange = (
   value: unknown,
@@ -55,6 +81,20 @@ export async function updateSettings(
       1,
       365,
       "回溯天數",
+    );
+  }
+  if (patch.recidivismWindowDaysByType !== undefined) {
+    const entries = Object.entries(patch.recidivismWindowDaysByType);
+    if (entries.length > MAX_WINDOW_OVERRIDES) {
+      throw new Error(
+        `分項回溯天數最多 ${MAX_WINDOW_OVERRIDES} 項（目前 ${entries.length} 項）`,
+      );
+    }
+    next.recidivismWindowDaysByType = Object.fromEntries(
+      entries.map(([code, days]) => [
+        code,
+        intInRange(days, 1, 365, `「${code}」的回溯天數`),
+      ]),
     );
   }
   if (patch.cardFromOffense !== undefined) {

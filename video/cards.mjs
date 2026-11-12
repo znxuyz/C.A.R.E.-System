@@ -70,7 +70,7 @@ const CARDS = {
       <div class="item"><b>前端 GitHub Pages</b><span>React + TypeScript，推上 main 自動部署</span></div>
       <div class="item"><b>後端 Firebase Spark</b><span>Firestore + Google 登入，不需信用卡</span></div>
       <div class="item"><b>不使用 Cloud Functions</b><span>邏輯在前端以交易執行，安全規則把關</span></div>
-      <div class="item"><b>29 項安全規則測試</b><span>提權、竄改時間、刪除紀錄皆有覆蓋</span></div>
+      <div class="item"><b>31 項安全規則測試</b><span>提權、竄改時間、刪除紀錄皆有覆蓋</span></div>
     </div>`, { tone: 'dark' }),
   'c06-end': shell(`
     <div class="mark">CARE</div>

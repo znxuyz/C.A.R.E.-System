@@ -228,6 +228,11 @@ export interface PublicBoardData {
 /** 系統設定（後台可調） */
 export interface SystemSettings {
   recidivismWindowDays: number;
+  /**
+   * 分項回溯天數：`{ 違規類型代碼: 天數 }`。
+   * 只放要特別設定的類型，沒列到的沿用 `recidivismWindowDays`。
+   */
+  recidivismWindowDaysByType: Record<string, number>;
   recidivismThreshold: number;
   /** 期間內第幾次起才發紙本反思卡（1 = 每次都發） */
   cardFromOffense: number;

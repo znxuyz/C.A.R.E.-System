@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAlert,
   evaluateRecidivism,
+  maxWindowDays,
   summarizeProgress,
+  windowDaysFor,
+  windowStartFor,
   type CountableInfraction,
   type RecidivismConfig,
 } from '../src/core/domain/recidivism.js';
@@ -261,5 +264,89 @@ describe('summarizeProgress（關注名單）', () => {
     });
     expect(rows[0]).toEqual({ studentId: 'stu_001', count: 2, shortfall: 1, atRisk: true });
     expect(rows[1]).toEqual({ studentId: 'stu_002', count: 1, shortfall: 2, atRisk: false });
+  });
+});
+
+describe('分項回溯天數（不同違規項目看不同天數）', () => {
+  /** 走廊奔跑看 15 天、口出穢言看 30 天；其餘類型沿用預設 15 天 */
+  const PER_TYPE: RecidivismConfig = {
+    windowDays: 15,
+    threshold: 3,
+    windowDaysByType: { RUN_IN_CORRIDOR: 15, FOUL_LANGUAGE: 30 },
+  };
+
+  it('windowDaysFor：有設定用設定值，沒設定或值無效都沿用預設', () => {
+    expect(windowDaysFor('FOUL_LANGUAGE', PER_TYPE)).toBe(30);
+    expect(windowDaysFor('RUN_IN_CORRIDOR', PER_TYPE)).toBe(15);
+    expect(windowDaysFor('LITTERING', PER_TYPE)).toBe(15);
+    expect(windowDaysFor(undefined, PER_TYPE)).toBe(15);
+    expect(
+      windowDaysFor('X', { windowDays: 15, windowDaysByType: { X: 0 } }),
+    ).toBe(15);
+    expect(
+      windowDaysFor('X', {
+        windowDays: 15,
+        windowDaysByType: { X: 7.5 } as Record<string, number>,
+      }),
+    ).toBe(15);
+  });
+
+  it('windowStartFor／maxWindowDays：各自往前推，最外圈取最長者', () => {
+    expect(windowStartFor(ASOF, 'RUN_IN_CORRIDOR', PER_TYPE)).toBe('2026-09-04');
+    expect(windowStartFor(ASOF, 'FOUL_LANGUAGE', PER_TYPE)).toBe('2026-08-20');
+    expect(maxWindowDays(PER_TYPE)).toBe(30);
+    expect(maxWindowDays({ windowDays: 15, threshold: 3 })).toBe(15);
+  });
+
+  it('超出自己那一類視窗的不計入，長天數的類型仍算得到', () => {
+    // 2026-08-25：走廊奔跑（15 天）早就過期，口出穢言（30 天）還在
+    const result = evaluateRecidivism({
+      studentId: 'stu_001',
+      asOf: ASOF,
+      infractions: [
+        rec({ id: 'old-run', occurredOn: '2026-08-25', typeCode: 'RUN_IN_CORRIDOR' }),
+        rec({ id: 'old-foul', occurredOn: '2026-08-25', typeCode: 'FOUL_LANGUAGE' }),
+        rec({ id: 'new-run', occurredOn: '2026-09-17', typeCode: 'RUN_IN_CORRIDOR' }),
+      ],
+      config: PER_TYPE,
+    });
+    expect(result.counted.map((c) => c.id)).toEqual(['old-foul', 'new-run']);
+    expect(result.count).toBe(2);
+    expect(result.triggered).toBe(false);
+  });
+
+  it('門檻仍是合併計算：不同類型湊滿次數一樣觸發', () => {
+    const result = evaluateRecidivism({
+      studentId: 'stu_001',
+      asOf: ASOF,
+      infractions: [
+        rec({ id: 'i1', occurredOn: '2026-08-22', typeCode: 'FOUL_LANGUAGE' }),
+        rec({ id: 'i2', occurredOn: '2026-09-10', typeCode: 'RUN_IN_CORRIDOR' }),
+        rec({ id: 'i3', occurredOn: '2026-09-18', typeCode: 'RUN_IN_CORRIDOR' }),
+      ],
+      config: PER_TYPE,
+    });
+    expect(result.triggered).toBe(true);
+    expect(result.count).toBe(3);
+    // 回報的視窗取最外圈（30 天），所有計入的違規都落在裡面
+    expect(result.windowDays).toBe(30);
+    expect(result.windowStart).toBe('2026-08-20');
+    expect(result.counted.every((c) => c.occurredOn >= result.windowStart)).toBe(true);
+  });
+
+  it('沒有分項設定時，行為與原本完全相同', () => {
+    const infractions = [
+      rec({ id: 'i1', occurredOn: '2026-09-10', typeCode: 'RUN_IN_CORRIDOR' }),
+      rec({ id: 'i2', occurredOn: '2026-09-03', typeCode: 'FOUL_LANGUAGE' }),
+    ];
+    const plain = evaluateRecidivism({ studentId: 'stu_001', asOf: ASOF, infractions, config: CONFIG });
+    const empty = evaluateRecidivism({
+      studentId: 'stu_001',
+      asOf: ASOF,
+      infractions,
+      config: { ...CONFIG, windowDaysByType: {} },
+    });
+    expect(plain.count).toBe(1); // 09-03 已超出 15 天視窗
+    expect(empty).toEqual(plain);
   });
 });

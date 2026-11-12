@@ -68,6 +68,11 @@ import { listRestrictionsOn } from "../core/services/restrictions.ts";
 import { loadSettings, updateSettings } from "../core/services/settings.ts";
 import { addDays, diffDays } from "../core/domain/dates.ts";
 import {
+  maxWindowDays,
+  windowDaysFor,
+  windowStartFor,
+} from "../core/domain/recidivism.ts";
+import {
   matchStudents,
   type StudentIndexEntry,
 } from "../core/domain/studentSearch.ts";
@@ -601,12 +606,17 @@ export const api = {
     if (USE_MOCK) return mockApi.firstOffenders();
     const settings = await cachedSettings();
     const today = todayTaipei();
-    const windowStart = addDays(today, -(settings.recidivismWindowDays - 1));
+    const windowConfig = {
+      windowDays: settings.recidivismWindowDays,
+      windowDaysByType: settings.recidivismWindowDaysByType,
+    };
+    // 查詢範圍用最長的那個視窗撈回來，再依每一筆自己的類型天數過濾
+    const queryStart = addDays(today, -(maxWindowDays(windowConfig) - 1));
 
     const snap = await getDocs(
       query(
         collection(db(), COL.infractions),
-        where("occurredOn", ">=", windowStart),
+        where("occurredOn", ">=", queryStart),
         where("occurredOn", "<=", today),
         fsLimit(1000),
       ),
@@ -619,6 +629,14 @@ export const api = {
       if (status === "VOIDED" || status === "EXEMPTED") continue;
       if (d.get("countsTowardRecidivism") === false) continue;
       if (d.get("consumedByAlertId")) continue;
+      // 分項回溯天數：短天數的類型可能已經超出自己的視窗
+      const typeCode = d.get("typeCode") as string | undefined;
+      if (
+        (d.get("occurredOn") as string) <
+        windowStartFor(today, typeCode, windowConfig)
+      ) {
+        continue;
+      }
       const studentId = d.get("studentId") as string;
       byStudent.set(studentId, [...(byStudent.get(studentId) ?? []), d]);
     }
@@ -628,9 +646,11 @@ export const api = {
       .map((docs) => {
         const d = docs[0]!;
         const occurredOn = d.get("occurredOn") as string;
+        // 到期日用這一筆自己那一類的天數算
         const expiresOn = addDays(
           occurredOn,
-          settings.recidivismWindowDays - 1,
+          windowDaysFor(d.get("typeCode") as string | undefined, windowConfig) -
+            1,
         );
         return {
           studentId: d.get("studentId") as string,
