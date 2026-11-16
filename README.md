@@ -21,9 +21,12 @@
 3 分 24 秒，全程是**實際操作畫面**（示範模式的模擬資料），含繁體中文字幕與配樂。
 從登入、登錄違規、發卡與回收，一路走到追蹤輔導、後台設定與公開看板。
 
-[![功能介紹影片](docs/images/video-poster.jpg)](docs/media/care-system-intro.mp4)
+下面這段是其中 20 秒（同一位學生期間內第二次 → 發卡並凍結當日自由下課）：
 
-▶ **[觀看影片（MP4・22 MB）](docs/media/care-system-intro.mp4)** —— GitHub 上可直接線上播放。
+![操作示意](docs/images/preview.gif)
+
+▶ **完整影片：[care-system-intro.mp4](docs/media/care-system-intro.mp4)**（22 MB）。
+GitHub 不會在網頁上播放版控中的影片檔，請用該頁的 **Download raw file** 下載後觀看。
 
 | 段落 | 內容 |
 |---|---|
