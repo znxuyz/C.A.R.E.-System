@@ -1,0 +1,177 @@
+<!doctype html>
+<!--
+  功能介紹影片的播放頁。
+
+  為什麼需要這一頁：GitHub 的檔案頁不會播放版控中的 mp4（只給下載），
+  但 GitHub Pages 會以 video/mp4 正常提供，瀏覽器就能直接播。
+  因此影片放在 web/public/media/ 隨前端一起部署，README 連到這裡。
+-->
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>功能介紹影片 — C.A.R.E. System</title>
+    <meta
+      name="description"
+      content="C.A.R.E. System 功能介紹影片：校園生活管教的違規登錄與再犯追蹤系統，3 分 24 秒實機操作。"
+    />
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #e8eaed;
+        --ink-dim: #9aa0a6;
+        --line: #2d3137;
+        --brand: #60a5fa;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #0f1115;
+        color: var(--ink);
+        font-family:
+          "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui,
+          -apple-system, sans-serif;
+        line-height: 1.7;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 32px 16px 56px;
+      }
+      main {
+        width: 100%;
+        max-width: 1100px;
+      }
+      h1 {
+        font-size: clamp(20px, 3.4vw, 28px);
+        margin: 0 0 4px;
+        font-weight: 650;
+      }
+      .sub {
+        color: var(--ink-dim);
+        font-size: 14px;
+        margin: 0 0 20px;
+      }
+      video {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        display: block;
+      }
+      .chapters {
+        margin: 24px 0 0;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .chapters h2 {
+        font-size: 14px;
+        margin: 0;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+        color: var(--ink-dim);
+        font-weight: 600;
+      }
+      .chapters ol {
+        margin: 0;
+        padding: 8px 0;
+        list-style: none;
+      }
+      .chapters li {
+        display: flex;
+        gap: 14px;
+        padding: 7px 16px;
+        font-size: 14px;
+        align-items: baseline;
+      }
+      .chapters button {
+        background: none;
+        border: 0;
+        color: var(--brand);
+        font: inherit;
+        font-variant-numeric: tabular-nums;
+        cursor: pointer;
+        padding: 0;
+        min-width: 44px;
+        text-align: left;
+      }
+      .chapters button:hover {
+        text-decoration: underline;
+      }
+      nav {
+        margin-top: 24px;
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        font-size: 14px;
+      }
+      nav a {
+        color: var(--brand);
+        text-decoration: none;
+      }
+      nav a:hover {
+        text-decoration: underline;
+      }
+      @media (max-width: 480px) {
+        body {
+          padding: 20px 12px 40px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>C.A.R.E. System — 功能介紹影片</h1>
+      <p class="sub">
+        3 分 24 秒・實機操作畫面（示範模式的模擬資料）・繁體中文字幕
+      </p>
+
+      <video id="player" controls preload="metadata" playsinline>
+        <source src="media/care-system-intro.mp4" type="video/mp4" />
+        你的瀏覽器不支援內嵌影片，請直接
+        <a href="media/care-system-intro.mp4">下載 MP4</a>。
+      </video>
+
+      <section class="chapters">
+        <h2>章節</h2>
+        <ol id="chapters">
+          <li data-at="0"><button type="button">0:00</button><span>片頭：「他這是第幾次了？」</span></li>
+          <li data-at="14"><button type="button">0:14</button><span>登入與生教組儀表板</span></li>
+          <li data-at="35"><button type="button">0:35</button><span>每日作業：登錄違規（兩種找人方式）</span></li>
+          <li data-at="51"><button type="button">0:51</button><span>期間內第一次：只做記錄與勸導</span></li>
+          <li data-at="66"><button type="button">1:06</button><span>第二次：發卡並凍結當日自由下課</span></li>
+          <li data-at="82"><button type="button">1:22</button><span>紙本回收與下課管制名單</span></li>
+          <li data-at="103"><button type="button">1:43</button><span>追蹤輔導：初犯名單</span></li>
+          <li data-at="115"><button type="button">1:55</button><span>再犯警示與認列依據</span></li>
+          <li data-at="125"><button type="button">2:05</button><span>安全觀察員值勤</span></li>
+          <li data-at="134"><button type="button">2:14</button><span>學生查詢與違規歷程</span></li>
+          <li data-at="147"><button type="button">2:27</button><span>設定與權限：校規參數可調</span></li>
+          <li data-at="169"><button type="button">2:49</button><span>帳號授權與公開看板</span></li>
+          <li data-at="187"><button type="button">3:07</button><span>架構與成本</span></li>
+        </ol>
+      </section>
+
+      <nav>
+        <a href="./">← 回到系統（示範模式）</a>
+        <a href="https://github.com/znxuyz/C.A.R.E.-System">GitHub 專案頁</a>
+        <a href="media/care-system-intro.mp4" download>下載 MP4（22 MB）</a>
+      </nav>
+    </main>
+
+    <script>
+      // 章節：點一下跳到該段並播放
+      const player = document.getElementById("player");
+      document.getElementById("chapters").addEventListener("click", (event) => {
+        const row = event.target.closest("li[data-at]");
+        if (!row) return;
+        player.currentTime = Number(row.dataset.at);
+        void player.play();
+      });
+    </script>
+  </body>
+</html>

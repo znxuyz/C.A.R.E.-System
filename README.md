@@ -21,12 +21,15 @@
 3 分 24 秒，全程是**實際操作畫面**（示範模式的模擬資料），含繁體中文字幕與配樂。
 從登入、登錄違規、發卡與回收，一路走到追蹤輔導、後台設定與公開看板。
 
-下面這段是其中 20 秒（同一位學生期間內第二次 → 發卡並凍結當日自由下課）：
+### ▶ [點這裡線上觀看（附章節，免下載）](https://znxuyz.github.io/C.A.R.E.-System/watch.html)
 
-![操作示意](docs/images/preview.gif)
+[![操作示意](docs/images/preview.gif)](https://znxuyz.github.io/C.A.R.E.-System/watch.html)
 
-▶ **完整影片：[care-system-intro.mp4](docs/media/care-system-intro.mp4)**（22 MB）。
-GitHub 不會在網頁上播放版控中的影片檔，請用該頁的 **Download raw file** 下載後觀看。
+↑ 點圖即可播放。上面這段動圖是其中 20 秒（同一位學生期間內第二次 → 發卡並凍結當日自由下課）。
+
+> 影片檔隨前端一起部署於 GitHub Pages，因此可以直接在瀏覽器播放。
+> 原始檔也在版控內（[`web/public/media/care-system-intro.mp4`](web/public/media/care-system-intro.mp4)，22 MB）；
+> GitHub 的檔案頁不會播放版控中的影片，只提供 Download raw file。
 
 | 段落 | 內容 |
 |---|---|
@@ -118,6 +121,8 @@ firestore.rules             唯一防線：權限判定 + 每筆寫入的形狀�
 firestore.indexes.json      6 筆複合索引（也可在 Console 手動建立）
 scripts/deploy-firestore.mjs  以 REST API 發布規則與索引（CI 用，不依賴 firebase-tools）
 seed/                       管理者授權、系統參數、違規類型、地點、示範資料
+web/public/watch.html       介紹影片的播放頁（隨前端部署，故可線上播放）
+web/public/media/           介紹影片本體
 video/                      介紹影片的錄影腳本、標題卡、配樂與合成流程
 docs/                       架構、綱要、演算法、UI 規劃、設定手冊、介紹影片
 ```
